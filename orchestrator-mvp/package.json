@@ -1,0 +1,29 @@
+{
+  "name": "orchestrator-mvp",
+  "version": "0.1.0",
+  "description": "Multi-model sandboxed agent orchestrator: routes one query to isolated model workers via the Cursor SDK, merges outputs within a confidence bound.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "server": "tsx src/index.ts --server",
+    "query": "tsx src/index.ts --query",
+    "models": "tsx scripts/list-models.ts",
+    "eval": "tsx scripts/eval.ts",
+    "test": "vitest run",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "build": "npm run web:build"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.18",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.3",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
