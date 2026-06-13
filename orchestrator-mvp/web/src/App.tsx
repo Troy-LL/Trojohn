@@ -297,7 +297,7 @@ function App() {
               ...next,
               {
                 round,
-                phase: p.phase ?? (round === 0 ? 'propose' : 'revise'),
+                phase: p.phase ?? (round === -1 ? 'question' : round === 0 ? 'propose' : 'revise'),
                 confidence: p.confidence,
                 earlyExit: p.earlyExit,
               },
@@ -474,8 +474,10 @@ function App() {
           <div className="rounds-grid">
             {roundSummaries.map((r) => (
               <div key={r.round} className={`round-chip ${r.earlyExit ? 'early' : ''}`}>
-                <span className="round-chip-label">R{r.round} · {r.phase}</span>
-                <span className="round-chip-conf">{Math.round(r.confidence * 100)}%</span>
+                <span className="round-chip-label">{r.round === -1 ? 'Q' : `R${r.round}`} · {r.phase}</span>
+                {r.phase !== 'question' && (
+                  <span className="round-chip-conf">{Math.round(r.confidence * 100)}%</span>
+                )}
                 {r.earlyExit && <span className="round-chip-exit">early exit</span>}
               </div>
             ))}

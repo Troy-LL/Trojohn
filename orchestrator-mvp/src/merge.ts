@@ -28,6 +28,7 @@ export interface MergeInput {
   deliberationTrigger: DeliberationTrigger;
   transport: TransportMode;
   r0Gate: R0Gate;
+  criticalQuestions?: string[];
 }
 
 function pickBestByWeight(
@@ -66,6 +67,7 @@ function buildResponse(
     transport: input.transport,
     r0Gate: input.r0Gate,
     confidenceThreshold: input.confidenceThreshold,
+    criticalQuestions: input.criticalQuestions,
   };
 }
 

@@ -4,6 +4,7 @@ import {
   runDeliberation,
   runFollowUpRounds,
   runProposalRound,
+  runQuestionRound,
 } from './deliberation.js';
 import { runJudge } from './judge.js';
 import { SessionLogger } from './log.js';
@@ -211,6 +212,7 @@ export class Orchestrator {
         transport: this.cfg.transport,
         deliberationTrigger: this.cfg.deliberationRounds > 0 ? 'judge-gated' : 'vote',
         confidenceThreshold: this.cfg.confidenceThreshold,
+        criticalThinking: this.cfg.criticalThinking && this.cfg.deliberationRounds > 0,
       },
     });
 
@@ -222,8 +224,41 @@ export class Orchestrator {
     let rounds: OrchestratorResponse['rounds'];
     let judgeVerdict: JudgeVerdict | null = null;
     let r0Gate: R0Gate = 'n/a';
+    let criticalQuestions: string[] | undefined;
 
     if (this.cfg.deliberationRounds > 0) {
+      let afterQuestion = undefined;
+
+      if (this.cfg.criticalThinking) {
+        const questionRound = await runQuestionRound(
+          selected,
+          request.query,
+          request.context,
+          sessionId,
+          this.cfg,
+          this.transport,
+          hooks,
+        );
+        criticalQuestions = questionRound.questions.length ? questionRound.questions : undefined;
+        afterQuestion = questionRound.state;
+
+        if (criticalQuestions?.length) {
+          this.publish({
+            type: 'similarity_scores',
+            sender: 'orchestrator',
+            recipient: 'broadcast',
+            round: -1,
+            sessionId,
+            payload: {
+              scores: [],
+              confidence: 0,
+              phase: 'question',
+              criticalQuestions,
+            },
+          });
+        }
+      }
+
       // Judge-gated deliberation: R0 → quick judge → follow-up only if judge is uncertain
       const proposal = await runProposalRound(
         selected,
@@ -233,6 +268,8 @@ export class Orchestrator {
         this.cfg,
         this.transport,
         hooks,
+        criticalQuestions,
+        afterQuestion,
       );
 
       allResults = proposal.allResults;
@@ -253,7 +290,8 @@ export class Orchestrator {
       if (r0Judge && r0Judge.confidence >= this.cfg.confidenceThreshold) {
         r0Gate = 'early-exit';
         judgeVerdict = r0Judge;
-        if (rounds[0]) rounds[0].earlyExit = true;
+        const proposeRound = rounds.find((r) => r.phase === 'propose');
+        if (proposeRound) proposeRound.earlyExit = true;
       } else {
         r0Gate = r0Judge ? 'uncertain' : 'judge-failed';
         const followUp = await runFollowUpRounds(
@@ -343,6 +381,7 @@ export class Orchestrator {
       deliberationTrigger: this.cfg.deliberationRounds > 0 ? 'judge-gated' : 'vote',
       transport: this.cfg.transport,
       r0Gate,
+      criticalQuestions,
     });
 
     if (response.similarityScores.length) {

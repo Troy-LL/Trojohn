@@ -17,7 +17,8 @@ export type MessageType =
   | 'judge_verdict'
   | 'final'
   | 'error'
-  // Reserved for phase-2 deliberation rounds (RecursiveMAS-style text recursion)
+  // Deliberation rounds (RecursiveMAS-style text recursion)
+  | 'question'
   | 'proposal'
   | 'critique'
   | 'revision';

@@ -5,6 +5,14 @@ import type { RoundInput, WorkerConfig, WorkerResult } from '../types.js';
 import { BaseWorker, type CallOptions } from './base.js';
 
 function phaseInstructions(phase: RoundInput['phase'], round: number): string {
+  if (phase === 'question') {
+    return `CRITICAL THINKING PHASE (before answering)
+- Do NOT answer the query yet.
+- List 2–4 sharp questions you would need clarified to answer well, based only on the user query.
+- Surface hidden assumptions, scope boundaries, timeframe, definitions, and tradeoffs.
+- One question per line. End each with "?".
+- Keep the full list under 120 words.`;
+  }
   if (phase === 'critique') {
     return `DELIBERATION PHASE: CRITIQUE (round ${round})
 - You received peer proposals from round 0. Critique factual errors, weak reasoning, and missing caveats.
@@ -25,14 +33,21 @@ function buildPrompt(
 ): string {
   const ctx = context ? `\n\nADDITIONAL CONTEXT:\n${context}` : '';
   let peerSection = '';
-  if (roundInput && roundInput.peerOutputs.length > 0) {
+  if (roundInput?.phase === 'question') {
+    peerSection = `\n\n${phaseInstructions('question', roundInput.round)}`;
+  } else if (roundInput && roundInput.peerOutputs.length > 0) {
     const blocks = roundInput.peerOutputs.map(
       (p) =>
         `[${p.messageType.toUpperCase()} from ${p.workerId.toUpperCase()} (${p.role})]\n${p.text}`,
     );
     peerSection = `\n\nPEER RESPONSES (round ${roundInput.round}):\n${blocks.join('\n\n')}\n\n${phaseInstructions(roundInput.phase, roundInput.round)}`;
   }
-  return `${systemPrompt}${peerSection}\n\n---\n\nQUERY:\n${query}${ctx}`;
+  let criticalSection = '';
+  if (roundInput?.phase === 'propose' && roundInput.criticalQuestions?.length) {
+    const numbered = roundInput.criticalQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+    criticalSection = `\n\nCRITICAL QUESTIONS TO ADDRESS IN YOUR PROPOSAL:\n${numbered}\n- Explicitly resolve or acknowledge each question in your answer.\n`;
+  }
+  return `${systemPrompt}${peerSection}${criticalSection}\n\n---\n\nQUERY:\n${query}${ctx}`;
 }
 
 /**

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runDeliberation } from '../src/deliberation.js';
+import {
+  parseQuestionsFromOutputs,
+  runDeliberation,
+  runProposalRound,
+  runQuestionRound,
+} from '../src/deliberation.js';
 import type { AppConfig } from '../src/config.js';
 import { InProcessTransport } from '../src/transport/inprocess.js';
 import { SimulatedNetworkTransport } from '../src/transport/simulated.js';
@@ -32,6 +37,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sandboxRoot: '/tmp/sandbox',
     logDir: '/tmp/logs',
     demoEdgeModels: false,
+    criticalThinking: false,
     ...overrides,
   };
 }
@@ -203,6 +209,66 @@ describe('runDeliberation', () => {
 
     expect(result.rounds).toHaveLength(1);
     expect(result.rounds[0]?.phase).toBe('propose');
+  });
+});
+
+describe('parseQuestionsFromOutputs', () => {
+  it('deduplicates and normalizes question lines', () => {
+    const qs = parseQuestionsFromOutputs([
+      '1. What timeframe should we consider?\n2. Who is the audience?',
+      'What timeframe should we consider?\nHow should success be measured?',
+    ]);
+    expect(qs).toContain('What timeframe should we consider?');
+    expect(qs).toContain('Who is the audience?');
+    expect(qs).toContain('How should success be measured?');
+    expect(qs.filter((q) => q.includes('timeframe'))).toHaveLength(1);
+  });
+});
+
+describe('runQuestionRound', () => {
+  it('aggregates worker questions and feeds them into propose', async () => {
+    const workers = [
+      new StubWorker(workerConfig('factual'), {
+        [-1]: 'What geographic region applies?',
+        0: 'Inflation rises when demand exceeds supply across the economy.',
+      }),
+      new StubWorker(workerConfig('reasoning'), {
+        [-1]: 'What time horizon matters for this analysis?',
+        0: 'Inflation rises when demand exceeds supply and money supply grows.',
+      }),
+    ];
+    const transport = new InProcessTransport();
+    const cfg = testConfig({ deliberationRounds: 2, criticalThinking: true });
+    const hooks = { publish: (msg: { timestamp?: number }) => transport.publish({ ...msg, timestamp: Date.now() }) };
+
+    const question = await runQuestionRound(
+      workers,
+      'What causes inflation?',
+      undefined,
+      'session-q',
+      cfg,
+      transport,
+      hooks,
+    );
+
+    expect(question.state.rounds[0]?.phase).toBe('question');
+    expect(question.questions.length).toBeGreaterThanOrEqual(2);
+
+    const proposal = await runProposalRound(
+      workers,
+      'What causes inflation?',
+      undefined,
+      'session-q',
+      cfg,
+      transport,
+      hooks,
+      question.questions,
+      question.state,
+    );
+
+    expect(proposal.rounds.map((r) => r.phase)).toEqual(['question', 'propose']);
+    expect(proposal.allResults.some((r) => r.round === -1)).toBe(true);
+    expect(proposal.allResults.some((r) => r.round === 0)).toBe(true);
   });
 });
 

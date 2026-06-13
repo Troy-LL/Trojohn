@@ -1,7 +1,15 @@
-import type { WorkerConfig, WorkerResult } from '../types.js';
+import type { RoundInput, WorkerConfig, WorkerResult } from '../types.js';
 import { BaseWorker, type CallOptions } from './base.js';
 
-function phaseInstructions(phase: 'critique' | 'revise'): string {
+function phaseInstructions(phase: RoundInput['phase']): string {
+  if (phase === 'question') {
+    return `CRITICAL THINKING PHASE (before answering)
+- Do NOT answer the query yet.
+- List 2–4 sharp questions you would need clarified to answer well, based only on the user query.
+- Surface hidden assumptions, scope boundaries, timeframe, definitions, and tradeoffs.
+- One question per line. End each with "?".
+- Keep the full list under 120 words.`;
+  }
   if (phase === 'critique') {
     return `DELIBERATION PHASE: CRITIQUE
 - Critique peer proposals for factual errors, weak reasoning, and missing caveats.
@@ -21,14 +29,21 @@ function buildPrompt(
   const ctx = context ? `\n\nADDITIONAL CONTEXT:\n${context}` : '';
   let peerSection = '';
   const roundInput = options?.roundInput;
-  if (roundInput && roundInput.peerOutputs.length > 0 && roundInput.phase !== 'propose') {
+  if (roundInput?.phase === 'question') {
+    peerSection = `\n\n${phaseInstructions('question')}`;
+  } else if (roundInput && roundInput.peerOutputs.length > 0 && roundInput.phase !== 'propose') {
     const blocks = roundInput.peerOutputs.map(
       (p) =>
         `[${p.messageType.toUpperCase()} from ${p.workerId.toUpperCase()} (${p.role})]\n${p.text}`,
     );
     peerSection = `\n\nPEER RESPONSES:\n${blocks.join('\n\n')}\n\n${phaseInstructions(roundInput.phase)}`;
   }
-  return `${systemPrompt}${peerSection}\n\n---\n\nQUERY:\n${query}${ctx}`;
+  let criticalSection = '';
+  if (roundInput?.phase === 'propose' && roundInput.criticalQuestions?.length) {
+    const numbered = roundInput.criticalQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+    criticalSection = `\n\nCRITICAL QUESTIONS TO ADDRESS IN YOUR PROPOSAL:\n${numbered}\n- Explicitly resolve or acknowledge each question in your answer.\n`;
+  }
+  return `${systemPrompt}${peerSection}${criticalSection}\n\n---\n\nQUERY:\n${query}${ctx}`;
 }
 
 interface OllamaChatResponse {

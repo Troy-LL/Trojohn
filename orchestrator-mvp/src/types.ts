@@ -2,7 +2,7 @@ export type WorkerRole = 'factual' | 'reasoning' | 'advocate' | 'local';
 
 export type WorkerProvider = 'cursor' | 'ollama';
 
-export type DeliberationPhase = 'propose' | 'critique' | 'revise';
+export type DeliberationPhase = 'question' | 'propose' | 'critique' | 'revise';
 
 export interface WorkerConfig {
   id: string;
@@ -35,13 +35,15 @@ export interface PeerOutput {
   workerId: string;
   role: WorkerRole;
   text: string;
-  messageType: 'proposal' | 'critique';
+  messageType: 'question' | 'proposal' | 'critique';
 }
 
 export interface RoundInput {
   round: number;
   phase: DeliberationPhase;
   peerOutputs: PeerOutput[];
+  /** Aggregated critical questions from the question phase (propose round only). */
+  criticalQuestions?: string[];
 }
 
 export type SimilarityMethod = 'embeddings' | 'tfidf';
@@ -120,6 +122,8 @@ export interface OrchestratorResponse {
   r0Gate: R0Gate;
   /** Confidence threshold used for gating this session. */
   confidenceThreshold: number;
+  /** Critical questions workers raised about the user query before answering. */
+  criticalQuestions?: string[];
 }
 
 export interface DeliberationPayload {

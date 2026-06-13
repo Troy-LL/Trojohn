@@ -35,6 +35,8 @@ export interface AppConfig {
   logDir: string;
   /** When true, SSE + /api/health show on-device SLM names instead of real model IDs. */
   demoEdgeModels: boolean;
+  /** Pre-answer critical question round when deliberation is enabled. */
+  criticalThinking: boolean;
 }
 
 function bool(name: string, fallback: boolean): boolean {
@@ -88,5 +90,6 @@ export function loadConfig(): AppConfig {
     sandboxRoot: path.join(projectRoot, 'sandboxes'),
     logDir: path.join(projectRoot, 'logs'),
     demoEdgeModels: bool('DEMO_EDGE_MODELS', true),
+    criticalThinking: bool('CRITICAL_THINKING', true),
   };
 }

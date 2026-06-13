@@ -15,18 +15,54 @@ const PHASE_BY_ROUND: DeliberationPhase[] = ['propose', 'critique', 'revise'];
 
 const MESSAGE_TYPE_BY_ROUND: MessageType[] = ['proposal', 'critique', 'revision'];
 
+/** Pre-proposal critical question round (before R0 propose). */
+export const QUESTION_ROUND = -1;
+
 function phaseForRound(round: number): DeliberationPhase {
+  if (round === QUESTION_ROUND) return 'question';
   return PHASE_BY_ROUND[round] ?? 'revise';
 }
 
 function messageTypeForRound(round: number): MessageType {
+  if (round === QUESTION_ROUND) return 'question';
   return MESSAGE_TYPE_BY_ROUND[round] ?? 'revision';
 }
 
 /** Advocate runs in R0 only — it feeds the judge but does not vote or recurse. */
 function workersForRound(workers: BaseWorker[], round: number): BaseWorker[] {
-  if (round === 0) return workers;
+  if (round === QUESTION_ROUND || round === 0) return workers;
   return workers.filter((w) => w.config.role !== 'advocate');
+}
+
+/** Extract deduplicated questions from worker outputs (2–12 kept). */
+export function parseQuestionsFromOutputs(outputs: string[]): string[] {
+  const seen = new Set<string>();
+  const questions: string[] = [];
+
+  for (const text of outputs) {
+    for (const line of text.split('\n')) {
+      let trimmed = line.trim().replace(/^(\d+[\.\)]\s*|[-*•]\s*)/, '').trim();
+      if (!trimmed || trimmed.length < 10) continue;
+
+      if (!trimmed.endsWith('?')) {
+        if (
+          !/\b(what|why|how|who|when|where|which|whether|should|is|are|does|do|can|could)\b/i.test(
+            trimmed,
+          )
+        ) {
+          continue;
+        }
+        trimmed = trimmed.endsWith('.') ? `${trimmed.slice(0, -1)}?` : `${trimmed}?`;
+      }
+
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      questions.push(trimmed);
+    }
+  }
+
+  return questions.slice(0, 12);
 }
 
 function buildPeerOutputs(
@@ -129,6 +165,7 @@ export async function runDeliberation(
   hooks: DeliberationHooks,
   range?: DeliberationRange,
   initial?: Partial<DeliberationState>,
+  criticalQuestions?: string[],
 ): Promise<DeliberationResult> {
   const fromRound = range?.fromRound ?? 0;
   const toRound = range?.toRound ?? cfg.deliberationRounds;
@@ -147,7 +184,16 @@ export async function runDeliberation(
     const activeWorkers = workersForRound(workers, round);
 
     const roundInputByWorker = new Map<string, RoundInput>();
-    if (round > 0) {
+    if (round === 0 && criticalQuestions?.length) {
+      for (const worker of activeWorkers) {
+        roundInputByWorker.set(worker.config.id, {
+          round,
+          phase,
+          peerOutputs: [],
+          criticalQuestions,
+        });
+      }
+    } else if (round > 0) {
       for (const worker of activeWorkers) {
         roundInputByWorker.set(worker.config.id, {
           round,
@@ -208,8 +254,10 @@ export async function runDeliberation(
     state.priorResults.set(round, delivered);
 
     const voters = results.filter((r) => r.status === 'success' && r.voter && r.output.trim());
-    const votePreview =
-      voters.length >= 2
+    const skipVote = phase === 'question';
+    const votePreview = skipVote
+      ? { average: 0, pairs: [], method: 'tfidf' as const }
+      : voters.length >= 2
         ? await pairwiseSimilarity(
             voters.map((r) => ({ id: r.workerId, output: r.output })),
             cfg,
@@ -242,6 +290,100 @@ export async function runDeliberation(
   };
 }
 
+export interface QuestionRoundResult {
+  questions: string[];
+  state: DeliberationState;
+}
+
+/** All workers surface clarifying questions before any proposal is written. */
+export async function runQuestionRound(
+  workers: BaseWorker[],
+  query: string,
+  context: string | undefined,
+  sessionId: string,
+  cfg: AppConfig,
+  transport: Transport,
+  hooks: DeliberationHooks,
+): Promise<QuestionRoundResult> {
+  const round = QUESTION_ROUND;
+  const phase: DeliberationPhase = 'question';
+  const roundStart = Date.now();
+  const msgType = messageTypeForRound(round);
+  const activeWorkers = workersForRound(workers, round);
+  const questionInput: RoundInput = { round, phase, peerOutputs: [] };
+
+  const results = await Promise.all(
+    activeWorkers.map(async (worker) => {
+      const { id } = worker.config;
+      hooks.onWorkerStart?.(id, round, phase);
+
+      const result = await worker.call(query, context, {
+        hooks: {
+          onToken: (chunk) => hooks.onWorkerToken?.(id, round, chunk),
+        },
+        roundInput: questionInput,
+      });
+
+      const stamped: WorkerResult = { ...result, round };
+      hooks.onWorkerDone?.(stamped);
+      return stamped;
+    }),
+  );
+
+  const publishable = results.filter((r) => r.status === 'success' && r.output.trim());
+  const expectedIds = publishable.map((r) => r.workerId);
+
+  const collectionPromise = collectDeliberationMessages(
+    transport,
+    sessionId,
+    round,
+    msgType,
+    expectedIds,
+    cfg.roundTimeoutMs,
+  );
+
+  for (const r of publishable) {
+    hooks.publish({
+      type: msgType,
+      sender: r.workerId,
+      recipient: 'broadcast',
+      round,
+      sessionId,
+      payload: {
+        workerId: r.workerId,
+        role: r.role,
+        text: r.output,
+      } satisfies DeliberationPayload,
+    });
+  }
+
+  await collectionPromise;
+
+  const questions = parseQuestionsFromOutputs(publishable.map((r) => r.output));
+
+  const summary: RoundSummary = {
+    round,
+    phase,
+    confidence: 0,
+    latencyMs: Date.now() - roundStart,
+    workerIds: results.map((r) => r.workerId),
+    similarityMethod: 'tfidf',
+  };
+  hooks.onRoundComplete?.(summary);
+
+  const latestByWorker = new Map(results.map((r) => [r.workerId, r]));
+
+  return {
+    questions,
+    state: {
+      priorResults: new Map(),
+      allResults: results,
+      latestByWorker,
+      rounds: [summary],
+    },
+  };
+}
+
 /** Run round 0 (propose) only. */
 export async function runProposalRound(
   workers: BaseWorker[],
@@ -251,11 +393,21 @@ export async function runProposalRound(
   cfg: AppConfig,
   transport: Transport,
   hooks: DeliberationHooks,
+  criticalQuestions?: string[],
+  afterQuestion?: DeliberationState,
 ): Promise<DeliberationResult> {
-  return runDeliberation(workers, query, context, sessionId, cfg, transport, hooks, {
-    fromRound: 0,
-    toRound: 0,
-  });
+  return runDeliberation(
+    workers,
+    query,
+    context,
+    sessionId,
+    cfg,
+    transport,
+    hooks,
+    { fromRound: 0, toRound: 0 },
+    afterQuestion,
+    criticalQuestions,
+  );
 }
 
 /** Run follow-up rounds (critique + revise) after R0, reusing transport state. */

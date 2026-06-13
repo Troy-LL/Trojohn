@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { Message, MessageType, Transport } from './types.js';
 
-const DELIBERATION_TYPES = new Set<MessageType>(['proposal', 'critique', 'revision']);
+const DELIBERATION_TYPES = new Set<MessageType>(['question', 'proposal', 'critique', 'revision']);
 
 export interface SimulatedTransportOptions {
   latencyMs: number;
