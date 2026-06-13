@@ -11,6 +11,7 @@ import type {
   TransportMode,
   WorkerResult,
 } from './types.js';
+import type { ArtifactSnapshot } from './scratchpad/types.js';
 import { pairwiseSimilarity, type SimilarityCfg } from './similarity.js';
 
 export interface MergeInput {
@@ -20,6 +21,7 @@ export interface MergeInput {
   /** workerId → merge weight */
   weights: Map<string, number>;
   confidenceThreshold: number;
+  r0GateThreshold?: number;
   totalLatencyMs: number;
   judgeVerdict?: JudgeVerdict | null;
   rounds?: RoundSummary[];
@@ -29,6 +31,7 @@ export interface MergeInput {
   transport: TransportMode;
   r0Gate: R0Gate;
   criticalQuestions?: string[];
+  artifact?: ArtifactSnapshot;
 }
 
 function pickBestByWeight(
@@ -67,7 +70,9 @@ function buildResponse(
     transport: input.transport,
     r0Gate: input.r0Gate,
     confidenceThreshold: input.confidenceThreshold,
+    r0GateThreshold: input.r0GateThreshold,
     criticalQuestions: input.criticalQuestions,
+    artifact: input.artifact,
   };
 }
 

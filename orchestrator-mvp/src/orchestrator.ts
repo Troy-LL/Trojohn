@@ -12,6 +12,9 @@ import { merge } from './merge.js';
 import { buildWorkerConfigs, createWorker } from './registry.js';
 import { selectWorkers } from './router.js';
 import { pairwiseSimilarity } from './similarity.js';
+import { synthesizeArtifact } from './scratchpad/synthesize.js';
+import type { Scratchpad } from './scratchpad/types.js';
+import { upsertSessionResult, initDb } from './store/sqlite.js';
 import { createTransport } from './transport/factory.js';
 import type { Transport } from './transport/types.js';
 import type { Message } from './transport/types.js';
@@ -31,10 +34,10 @@ export class Orchestrator {
   readonly transport: Transport;
 
   constructor(private readonly cfg: AppConfig) {
-    const configs = buildWorkerConfigs(cfg);
-    this.workers = configs.map((c) => createWorker(c, cfg));
-    this.weights = new Map(configs.map((c) => [c.id, c.weight]));
     this.transport = createTransport(cfg);
+    const configs = buildWorkerConfigs(cfg);
+    this.workers = configs.map((c) => createWorker(c, cfg, this.transport));
+    this.weights = new Map(configs.map((c) => [c.id, c.weight]));
   }
 
   getWorkerIds(): string[] {
@@ -194,6 +197,7 @@ export class Orchestrator {
   }
 
   async run(request: OrchestratorRequest): Promise<OrchestratorResponse> {
+    initDb(this.cfg.dbPath);
     const sessionId = request.sessionId ?? randomUUID();
     const start = Date.now();
     const logger = new SessionLogger(this.cfg.logDir, sessionId);
@@ -212,6 +216,7 @@ export class Orchestrator {
         transport: this.cfg.transport,
         deliberationTrigger: this.cfg.deliberationRounds > 0 ? 'judge-gated' : 'vote',
         confidenceThreshold: this.cfg.confidenceThreshold,
+        r0GateThreshold: this.cfg.r0GateThreshold,
         criticalThinking: this.cfg.criticalThinking && this.cfg.deliberationRounds > 0,
       },
     });
@@ -225,6 +230,7 @@ export class Orchestrator {
     let judgeVerdict: JudgeVerdict | null = null;
     let r0Gate: R0Gate = 'n/a';
     let criticalQuestions: string[] | undefined;
+    let scratchpad: Scratchpad | undefined;
 
     if (this.cfg.deliberationRounds > 0) {
       let afterQuestion = undefined;
@@ -275,6 +281,7 @@ export class Orchestrator {
       allResults = proposal.allResults;
       finalResults = proposal.finalResults;
       rounds = proposal.rounds;
+      scratchpad = proposal.scratchpad;
 
       const r0Judge = await this.invokeJudge(
         sessionId,
@@ -287,10 +294,12 @@ export class Orchestrator {
         { retries: 1, retryDelayMs: 2000 },
       );
 
-      if (r0Judge && r0Judge.confidence >= this.cfg.confidenceThreshold) {
+      const proposeRound = rounds.find((r) => r.phase === 'propose');
+      if (proposeRound && r0Judge) proposeRound.judgeConfidence = r0Judge.confidence;
+
+      if (r0Judge && r0Judge.confidence >= this.cfg.r0GateThreshold) {
         r0Gate = 'early-exit';
         judgeVerdict = r0Judge;
-        const proposeRound = rounds.find((r) => r.phase === 'propose');
         if (proposeRound) proposeRound.earlyExit = true;
       } else {
         r0Gate = r0Judge ? 'uncertain' : 'judge-failed';
@@ -307,6 +316,7 @@ export class Orchestrator {
         allResults = followUp.allResults;
         finalResults = followUp.finalResults;
         rounds = followUp.rounds;
+        scratchpad = followUp.scratchpad;
 
         judgeVerdict = await this.invokeJudge(
           sessionId,
@@ -337,6 +347,7 @@ export class Orchestrator {
       allResults = single.allResults;
       finalResults = single.finalResults;
       rounds = single.rounds;
+      scratchpad = single.scratchpad;
 
       const voters = finalResults.filter((r) => r.status === 'success' && r.voter);
       const votePreview =
@@ -373,6 +384,7 @@ export class Orchestrator {
       results: finalResults,
       weights: this.weights,
       confidenceThreshold: this.cfg.confidenceThreshold,
+      r0GateThreshold: this.cfg.deliberationRounds > 0 ? this.cfg.r0GateThreshold : undefined,
       totalLatencyMs: Date.now() - start,
       judgeVerdict,
       rounds,
@@ -382,6 +394,7 @@ export class Orchestrator {
       transport: this.cfg.transport,
       r0Gate,
       criticalQuestions,
+      artifact: scratchpad ? synthesizeArtifact(scratchpad, finalRound) : undefined,
     });
 
     if (response.similarityScores.length) {
@@ -409,6 +422,11 @@ export class Orchestrator {
     });
 
     logger.logResult(response);
+    try {
+      upsertSessionResult(response);
+    } catch {
+      // sqlite optional
+    }
     unsub();
     return response;
   }

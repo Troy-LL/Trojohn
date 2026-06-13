@@ -7,8 +7,10 @@
   "scripts": {
     "server": "tsx src/index.ts --server",
     "query": "tsx src/index.ts --query",
+    "phone-agent": "tsx src/agents/phoneAgent.ts",
     "models": "tsx scripts/list-models.ts",
     "eval": "tsx scripts/eval.ts",
+    "analyze": "tsx scripts/eval.ts --sqlite",
     "test": "vitest run",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
@@ -17,11 +19,13 @@
   "dependencies": {
     "@cursor/sdk": "^1.0.18",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.3",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

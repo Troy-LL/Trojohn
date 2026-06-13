@@ -15,6 +15,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     apiKey: 'test-key',
     confidenceThreshold: 0.72,
+    r0GateThreshold: 0.85,
     defaultTimeoutMs: 5000,
     roundTimeoutMs: 500,
     deliberationRounds: 2,
@@ -38,6 +39,9 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     logDir: '/tmp/logs',
     demoEdgeModels: false,
     criticalThinking: false,
+    scratchpadMode: 'off' as const,
+    dbPath: '/tmp/test.db',
+    signalPort: 3001,
     ...overrides,
   };
 }

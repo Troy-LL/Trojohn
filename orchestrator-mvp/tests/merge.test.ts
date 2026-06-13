@@ -127,6 +127,36 @@ describe('merge', () => {
     expect(r.finalOutput).toContain('not morally justified');
   });
 
+  it('merge withinTolerance uses confidenceThreshold independent of r0 gate', async () => {
+    const r = await merge({
+      ...base,
+      deliberationTrigger: 'judge-gated',
+      r0Gate: 'uncertain',
+      rounds: [
+        {
+          round: 0,
+          phase: 'propose',
+          confidence: 0.9,
+          latencyMs: 100,
+          workerIds: [],
+          judgeConfidence: 0.8,
+        },
+      ],
+      results: [
+        result('factual', 'Revised factual position on inflation and monetary policy.'),
+        result('reasoning', 'Revised reasoning on inflation demand and supply dynamics.'),
+      ],
+      judgeVerdict: {
+        finalAnswer: 'Judge synthesis after deliberation.',
+        confidence: 0.8,
+        conflicts: [],
+      },
+    });
+    expect(r.mergeStrategy).toBe('llm-judge');
+    expect(r.withinTolerance).toBe(true);
+    expect(r.confidence).toBe(0.8);
+  });
+
   it('early-exit uses judge over high TF-IDF vote', async () => {
     const text =
       'Inflation rises when demand exceeds supply and the money supply grows faster than output.';

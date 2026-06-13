@@ -1,3 +1,5 @@
+import type { ArtifactSnapshot } from './scratchpad/types.js';
+
 export type WorkerRole = 'factual' | 'reasoning' | 'advocate' | 'local';
 
 export type WorkerProvider = 'cursor' | 'ollama';
@@ -44,13 +46,15 @@ export interface RoundInput {
   peerOutputs: PeerOutput[];
   /** Aggregated critical questions from the question phase (propose round only). */
   criticalQuestions?: string[];
+  /** Serialized scratchpad snapshot for parallel claims mode. */
+  scratchpadSnapshot?: string;
 }
 
 export type SimilarityMethod = 'embeddings' | 'tfidf';
 
 export type DeliberationTrigger = 'judge-gated' | 'vote';
 
-export type TransportMode = 'inprocess' | 'simulated';
+export type TransportMode = 'inprocess' | 'simulated' | 'webrtc';
 
 /** Outcome of the R0 judge screen when DELIBERATION_ROUNDS > 0. */
 export type R0Gate = 'n/a' | 'early-exit' | 'uncertain' | 'judge-failed';
@@ -62,6 +66,8 @@ export interface RoundSummary {
   latencyMs: number;
   workerIds: string[];
   earlyExit?: boolean;
+  /** R0 judge confidence when the propose round was screened (judge-gated mode only). */
+  judgeConfidence?: number;
   /** Actual similarity backend used for this round (may differ from configured mode on fallback). */
   similarityMethod?: SimilarityMethod;
 }
@@ -120,10 +126,14 @@ export interface OrchestratorResponse {
   transport: TransportMode;
   /** R0 judge screen outcome when judge-gated; n/a for single-shot. */
   r0Gate: R0Gate;
-  /** Confidence threshold used for gating this session. */
+  /** Merge tolerance threshold used for this session. */
   confidenceThreshold: number;
+  /** R0 judge early-exit threshold when judge-gated; n/a for single-shot. */
+  r0GateThreshold?: number;
   /** Critical questions workers raised about the user query before answering. */
   criticalQuestions?: string[];
+  /** Structured claims artifact when SCRATCHPAD_MODE=parallel. */
+  artifact?: ArtifactSnapshot;
 }
 
 export interface DeliberationPayload {

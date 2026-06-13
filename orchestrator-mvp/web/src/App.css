@@ -95,6 +95,12 @@ body {
   background: rgba(107, 140, 174, 0.12);
 }
 
+.demo-badge.single-shot {
+  color: var(--noir-text-muted);
+  border-color: var(--noir-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .app-header p {
   margin: 0.35rem 0 0;
   color: var(--noir-text-muted);
@@ -755,5 +761,100 @@ body {
 
 .round-chip-exit {
   color: #3fb950;
+  font-size: 0.68rem;
+}
+
+.round-chip-judge {
+  font-weight: 600;
+  color: #58a6ff;
+  font-size: 0.72rem;
+}
+
+.thresholds-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+}
+
+.threshold-chip {
+  font-size: 0.72rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: var(--noir-surface);
+  border: 1px solid var(--noir-border-soft);
+  color: var(--noir-text-muted);
+}
+
+.threshold-chip.gate-early-exit {
+  border-color: rgba(63, 185, 80, 0.45);
+  color: #3fb950;
+}
+
+.threshold-chip.gate-uncertain {
+  border-color: rgba(210, 153, 34, 0.45);
+  color: #d29922;
+}
+
+.threshold-chip.gate-judge-failed {
+  border-color: rgba(248, 81, 73, 0.45);
+  color: #f85149;
+}
+
+.demo-badge.scratchpad {
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #58a6ff;
+}
+
+.questions-panel,
+.scratchpad-panel {
+  margin: 1rem 0 0;
+}
+
+.questions-panel h2,
+.scratchpad-panel h2 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--noir-text-muted);
+  margin-bottom: 0.55rem;
+}
+
+.questions-panel ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--noir-text);
+}
+
+.claims-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.claim-chip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: baseline;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  background: var(--noir-surface);
+  border: 1px solid var(--noir-border-soft);
+  font-size: 0.78rem;
+}
+
+.claim-chip.status-disputed {
+  border-color: rgba(248, 81, 73, 0.35);
+}
+
+.claim-id {
+  font-weight: 700;
+  color: var(--noir-amber);
+}
+
+.claim-meta {
+  color: var(--noir-text-muted);
   font-size: 0.68rem;
 }

@@ -3,6 +3,14 @@
 **Status:** Implemented in [`orchestrator-mvp/`](orchestrator-mvp/)  
 **Context:** Local development inside Cursor IDE
 
+### v0.3.2 implementation notes
+- **Split gate thresholds:** `R0_GATE_THRESHOLD` (default 0.85) for R0 early-exit; `CONFIDENCE_THRESHOLD` for merge tolerance.
+- **UI telemetry:** R0 gate badge, judge confidence, both thresholds, critical questions, scratchpad panel.
+- **Session store:** JSON index at `data/orchestrator-index.json` for cross-session aggregates (`npm run analyze`).
+- **Scratchpad mode:** `SCRATCHPAD_MODE=parallel` adds structured claims alongside free-text deliberation.
+- **WebRTC mesh (v1):** `TRANSPORT=webrtc` hub-and-spoke over WebSocket signaling; `npm run phone-agent` for remote nodes.
+- **Attestation registry:** commitment hashes + audit scores on `/api/workers`.
+
 ### v0.3.1 implementation notes
 - **Semantic similarity:** Ollama embeddings (`SIMILARITY_MODE=embeddings`, default) replace TF-IDF for voter agreement; auto-falls back to TF-IDF if Ollama is down.
 - **Judge-gated deliberation:** When `DELIBERATION_ROUNDS > 0`, R0 runs first → quick judge screen → follow-up rounds only if judge confidence is below threshold.
@@ -447,15 +455,18 @@ npx tsx src/index.ts --server --port 3000
 - Workers share the same system prompt format — no per-worker specialization yet
 
 **Next steps after MVP validation:**
-1. ~~Add per-worker specialization (e.g. one worker focused on factual retrieval, one on reasoning)~~ ✓ (v0.2)
-2. ~~Abstract the worker interface so a phone node and an API call look identical to the orchestrator~~ ✓ (v0.3 OllamaWorker)
-3. ~~Multi-round deliberation pipeline over transport~~ ✓ (v0.3)
-4. ~~Simulated network transport for mesh latency/drop testing~~ ✓ (v0.3)
-5. Add semantic embeddings for more accurate similarity scoring
-6. Log all sessions to SQLite for analysis of divergence patterns
-7. Replace API workers with local SLM workers (Ollama, llama.cpp) as default nodes
-8. WebRTC transport replacing SimulatedNetworkTransport
-9. Layer-level model sharding (Petals-style pipeline) when single-device SLM capacity is the bottleneck
+1. ~~Add per-worker specialization~~ ✓ (v0.2)
+2. ~~Abstract the worker interface (OllamaWorker)~~ ✓ (v0.3)
+3. ~~Multi-round deliberation pipeline~~ ✓ (v0.3)
+4. ~~Simulated network transport~~ ✓ (v0.3)
+5. ~~Semantic embeddings~~ ✓ (v0.3.1, Ollama fallback)
+6. ~~Split R0 gate threshold~~ ✓ (v0.3.2)
+7. ~~Session store for divergence analysis~~ ✓ (v0.3.2 JSON index)
+8. ~~Scratchpad / collaborative claims (parallel mode)~~ ✓ (v0.3.2 start)
+9. ~~WebRTC mesh transport (hub-and-spoke v1)~~ ✓ (v0.3.2 start)
+10. Full WebRTC data channels + TURN for production NAT traversal
+11. Replace API workers with local SLM workers as default nodes
+12. Layer-level model sharding (Petals-style pipeline)
 
 ---
 

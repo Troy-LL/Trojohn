@@ -5,6 +5,8 @@ import type { AppConfig } from './config.js';
 import { maskModelForDemo } from './demoDisplay.js';
 import { checkModelHealth, modelHealthFromConfig } from './registry.js';
 import { Orchestrator } from './orchestrator.js';
+import { initDb, listWorkers } from './store/sqlite.js';
+import { ensureMeshHub, getMeshHub } from './transport/factory.js';
 import type { OrchestratorRequest } from './types.js';
 import type { Message } from './transport/types.js';
 
@@ -22,6 +24,9 @@ function maskMessageForDemo(msg: Message): Message {
 }
 
 export async function startServer(cfg: AppConfig): Promise<void> {
+  initDb(cfg.dbPath);
+  ensureMeshHub(cfg);
+
   const app = express();
   app.use(express.json());
 
@@ -55,9 +60,22 @@ export async function startServer(cfg: AppConfig): Promise<void> {
       maxWorkers: workerIds.length,
       models,
       confidenceThreshold: cfg.confidenceThreshold,
+      r0GateThreshold: cfg.r0GateThreshold,
       deliberationRounds: cfg.deliberationRounds,
+      criticalThinking: cfg.criticalThinking && cfg.deliberationRounds > 0,
+      similarityMode: cfg.similarityMode,
+      scratchpadMode: cfg.scratchpadMode,
       transport: cfg.transport,
       demoEdgeModels: cfg.demoEdgeModels,
+      meshNodes: getMeshHub()?.getConnectedNodes().length ?? 0,
+    });
+  });
+
+  app.get('/api/workers', (_req, res) => {
+    const meshHub = getMeshHub();
+    res.json({
+      connected: meshHub?.getConnectedNodes() ?? [],
+      registry: listWorkers(),
     });
   });
 

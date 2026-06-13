@@ -1,4 +1,8 @@
 import type { AppConfig } from './config.js';
+import { applyClaimOps, serializeScratchpad } from './scratchpad/apply.js';
+import { parseClaimOps, stripClaimsBlock } from './scratchpad/parse.js';
+import { synthesizeArtifact } from './scratchpad/synthesize.js';
+import { emptyScratchpad, type Scratchpad } from './scratchpad/types.js';
 import type {
   DeliberationPayload,
   DeliberationPhase,
@@ -133,12 +137,14 @@ export interface DeliberationState {
   allResults: WorkerResult[];
   latestByWorker: Map<string, WorkerResult>;
   rounds: RoundSummary[];
+  scratchpad: Scratchpad;
 }
 
 export interface DeliberationResult {
   finalResults: WorkerResult[];
   allResults: WorkerResult[];
   rounds: RoundSummary[];
+  scratchpad?: Scratchpad;
 }
 
 export interface DeliberationRange {
@@ -152,6 +158,7 @@ function emptyState(): DeliberationState {
     allResults: [],
     latestByWorker: new Map(),
     rounds: [],
+    scratchpad: emptyScratchpad(),
   };
 }
 
@@ -175,7 +182,11 @@ export async function runDeliberation(
     allResults: initial?.allResults ?? [],
     latestByWorker: initial?.latestByWorker ?? new Map(),
     rounds: initial?.rounds ?? [],
+    scratchpad: initial?.scratchpad ?? emptyScratchpad(),
   };
+
+  const scratchpadEnabled = cfg.scratchpadMode === 'parallel';
+  const snapshot = () => (scratchpadEnabled ? serializeScratchpad(state.scratchpad) : undefined);
 
   for (let round = fromRound; round <= toRound; round++) {
     const phase = phaseForRound(round);
@@ -184,6 +195,7 @@ export async function runDeliberation(
     const activeWorkers = workersForRound(workers, round);
 
     const roundInputByWorker = new Map<string, RoundInput>();
+    const padSnap = snapshot();
     if (round === 0 && criticalQuestions?.length) {
       for (const worker of activeWorkers) {
         roundInputByWorker.set(worker.config.id, {
@@ -191,6 +203,7 @@ export async function runDeliberation(
           phase,
           peerOutputs: [],
           criticalQuestions,
+          scratchpadSnapshot: padSnap,
         });
       }
     } else if (round > 0) {
@@ -199,6 +212,16 @@ export async function runDeliberation(
           round,
           phase,
           peerOutputs: buildPeerOutputs(state.priorResults, worker.config.id, round),
+          scratchpadSnapshot: padSnap,
+        });
+      }
+    } else if (padSnap) {
+      for (const worker of activeWorkers) {
+        roundInputByWorker.set(worker.config.id, {
+          round,
+          phase,
+          peerOutputs: [],
+          scratchpadSnapshot: padSnap,
         });
       }
     }
@@ -215,9 +238,26 @@ export async function runDeliberation(
           roundInput: roundInputByWorker.get(id),
         });
 
-        const stamped: WorkerResult = { ...result, round };
+        const textOut = scratchpadEnabled ? stripClaimsBlock(result.output) : result.output;
+        const stamped: WorkerResult = { ...result, output: textOut, round };
         state.allResults.push(stamped);
         state.latestByWorker.set(id, stamped);
+
+        if (scratchpadEnabled && result.status === 'success') {
+          const ops = parseClaimOps(result.output, id, round);
+          if (ops.length) {
+            state.scratchpad = applyClaimOps(state.scratchpad, ops);
+            hooks.publish({
+              type: 'claim_op',
+              sender: id,
+              recipient: 'broadcast',
+              round,
+              sessionId,
+              payload: { ops, author: id },
+            });
+          }
+        }
+
         hooks.onWorkerDone?.(stamped);
         return stamped;
       }),
@@ -275,6 +315,18 @@ export async function runDeliberation(
     state.rounds.push(summary);
     hooks.onRoundComplete?.(summary);
 
+    if (scratchpadEnabled) {
+      const artifact = synthesizeArtifact(state.scratchpad, round);
+      hooks.publish({
+        type: 'scratchpad_update',
+        sender: 'orchestrator',
+        recipient: 'broadcast',
+        round,
+        sessionId,
+        payload: { artifact, claims: state.scratchpad.claims },
+      });
+    }
+
     if (votePreview.average >= cfg.confidenceThreshold) {
       summary.earlyExit = true;
       break;
@@ -287,6 +339,7 @@ export async function runDeliberation(
     finalResults: [...state.latestByWorker.values()],
     allResults: state.allResults,
     rounds: state.rounds,
+    scratchpad: state.scratchpad,
   };
 }
 
@@ -380,6 +433,7 @@ export async function runQuestionRound(
       allResults: results,
       latestByWorker,
       rounds: [summary],
+      scratchpad: emptyScratchpad(),
     },
   };
 }
@@ -437,6 +491,7 @@ export async function runFollowUpRounds(
       allResults: afterProposal.allResults,
       latestByWorker: new Map(afterProposal.finalResults.map((r) => [r.workerId, r])),
       rounds: afterProposal.rounds,
+      scratchpad: afterProposal.scratchpad ?? emptyScratchpad(),
     },
   );
 }

@@ -47,7 +47,11 @@ function buildPrompt(
     const numbered = roundInput.criticalQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
     criticalSection = `\n\nCRITICAL QUESTIONS TO ADDRESS IN YOUR PROPOSAL:\n${numbered}\n- Explicitly resolve or acknowledge each question in your answer.\n`;
   }
-  return `${systemPrompt}${peerSection}${criticalSection}\n\n---\n\nQUERY:\n${query}${ctx}`;
+  let scratchpadSection = '';
+  if (roundInput?.scratchpadSnapshot) {
+    scratchpadSection = `\n\nSHARED SCRATCHPAD (claims from all workers):\n${roundInput.scratchpadSnapshot}\n- Add, support, dispute, or revise claims via the claims JSON block.\n`;
+  }
+  return `${systemPrompt}${peerSection}${criticalSection}${scratchpadSection}\n\n---\n\nQUERY:\n${query}${ctx}`;
 }
 
 /**

@@ -1,6 +1,6 @@
 /**
- * CLM eval harness — compares deliberation settings from JSONL logs.
- * Runs stubbed offline analysis on existing logs, or live runs when CURSOR_API_KEY is set.
+ * CLM eval harness — compares deliberation settings from JSONL logs and session store.
+ * Requires CURSOR_API_KEY in .env for --live runs.
  *
  * Usage:
  *   npm run eval                        # analyze existing logs in logs/
@@ -52,9 +52,10 @@ interface LogResult {
   similarityMode?: 'embeddings' | 'tfidf';
   similarityMethod?: 'embeddings' | 'tfidf';
   deliberationTrigger?: 'judge-gated' | 'vote';
-  transport?: 'inprocess' | 'simulated';
+  transport?: 'inprocess' | 'simulated' | 'webrtc';
   r0Gate?: 'n/a' | 'early-exit' | 'uncertain' | 'judge-failed';
   confidenceThreshold?: number;
+  r0GateThreshold?: number;
   rounds: Array<{
     round: number;
     phase: string;
@@ -163,25 +164,39 @@ function printBuckets(title: string, buckets: Map<string, LogResult[]>): void {
   }
 }
 
+type FailureKind = 'connect_error' | 'merge_throw' | 'all_workers_failed' | 'unknown';
+
+function classifyError(err: unknown): FailureKind {
+  const msg = err instanceof Error ? err.message : String(err);
+  const name = err instanceof Error ? err.name : '';
+  if (name === 'ConnectError' || /connect/i.test(msg)) return 'connect_error';
+  if (/All workers failed/i.test(msg)) return 'all_workers_failed';
+  if (/merge/i.test(msg) || /judge/i.test(msg)) return 'merge_throw';
+  return 'unknown';
+}
+
 async function runQueryWithRetry(
   orch: { run: (req: { query: string }) => Promise<unknown> },
   query: string,
-): Promise<boolean> {
+  continueOnFailure = false,
+): Promise<{ ok: boolean; failure?: FailureKind }> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       if (attempt > 1) console.log(`    retry ${attempt}…`);
       await orch.run({ query });
-      return true;
+      return { ok: true };
     } catch (err) {
+      const kind = classifyError(err);
       const msg = err instanceof Error ? err.message : String(err);
       if (attempt === 2) {
-        console.error(`    FAILED: ${msg}`);
-        return false;
+        console.error(`    FAILED [${kind}]: ${msg}`);
+        return { ok: false, failure: kind };
       }
+      if (continueOnFailure) return { ok: false, failure: kind };
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
-  return false;
+  return { ok: false, failure: 'unknown' };
 }
 
 async function runLiveComparison(): Promise<void> {
@@ -190,6 +205,8 @@ async function runLiveComparison(): Promise<void> {
 
   const hardQueries = process.argv.includes('--hard-queries');
   const multiroundProbe = process.argv.includes('--multiround-probe');
+  const continueOnFailure = process.argv.includes('--continue-on-failure');
+  const failureBuckets = new Map<FailureKind, number>();
 
   if (multiroundProbe) {
     const probeOnlyIdx = process.argv.indexOf('--probe-query');
@@ -200,7 +217,7 @@ async function runLiveComparison(): Promise<void> {
     if (!process.env.SIMILARITY_MODE) process.env.SIMILARITY_MODE = 'tfidf';
     process.env.DELIBERATION_ROUNDS = '2';
     process.env.TRANSPORT = 'inprocess';
-    process.env.CONFIDENCE_THRESHOLD = MULTIROUND_PROBE_THRESHOLD;
+    process.env.R0_GATE_THRESHOLD = MULTIROUND_PROBE_THRESHOLD;
 
     const label = `rounds=2, gate=${MULTIROUND_PROBE_THRESHOLD} (multiround-probe)`;
     console.log(`Running live CLM eval (${probeQueries.length} queries, 1 scenario)…\n`);
@@ -210,10 +227,17 @@ async function runLiveComparison(): Promise<void> {
     let failures = 0;
     for (const query of probeQueries) {
       console.log(`  [${label}] ${query.slice(0, 50)}…`);
-      const ok = await runQueryWithRetry(orch, query);
-      if (!ok) failures++;
+      const { ok, failure } = await runQueryWithRetry(orch, query, continueOnFailure);
+      if (!ok) {
+        failures++;
+        if (failure) failureBuckets.set(failure, (failureBuckets.get(failure) ?? 0) + 1);
+      }
     }
     if (failures > 0) console.log(`\n${failures} query run(s) failed — partial logs saved.`);
+    if (failureBuckets.size > 0) {
+      console.log('\nFailure buckets:');
+      for (const [kind, count] of failureBuckets) console.log(`  ${kind}: ${count}`);
+    }
     return;
   }
 
@@ -258,9 +282,17 @@ async function runLiveComparison(): Promise<void> {
 
     for (const query of queries) {
       console.log(`  [${scenario.label}] ${query.slice(0, 50)}…`);
-      const ok = await runQueryWithRetry(orch, query);
-      if (!ok) failures++;
+      const { ok, failure } = await runQueryWithRetry(orch, query, continueOnFailure);
+      if (!ok) {
+        failures++;
+        if (failure) failureBuckets.set(failure, (failureBuckets.get(failure) ?? 0) + 1);
+      }
     }
+  }
+
+  if (failureBuckets.size > 0) {
+    console.log('\nFailure buckets:');
+    for (const [kind, count] of failureBuckets) console.log(`  ${kind}: ${count}`);
   }
 
   if (failures > 0) {
@@ -270,9 +302,25 @@ async function runLiveComparison(): Promise<void> {
 
 async function main(): Promise<void> {
   const live = process.argv.includes('--live');
+  const sqliteMode = process.argv.includes('--sqlite');
 
   if (live) {
     await runLiveComparison();
+  }
+
+  if (sqliteMode) {
+    const { initDb, queryAggregates } = await import('../src/store/sqlite.js');
+    const { loadConfig } = await import('../src/config.js');
+    initDb(loadConfig().dbPath);
+    const agg = queryAggregates();
+    console.log('\nSession store aggregates');
+    console.log('='.repeat(40));
+    console.log(`  total sessions:     ${agg.totalSessions}`);
+    console.log(`  avg confidence:     ${(agg.avgConfidence * 100).toFixed(1)}%`);
+    console.log(`  within tolerance:   ${(agg.withinToleranceRate * 100).toFixed(1)}%`);
+    console.log('  by R0 gate:', agg.byR0Gate);
+    console.log('  by transport:', agg.byTransport);
+    if (!live) return;
   }
 
   const results = parseResults();
@@ -327,7 +375,7 @@ async function main(): Promise<void> {
     printAggregate(aggregate('  uncertain → follow-up', intentionalMulti));
   }
 
-  const probeRuns = results.filter((r) => (r.confidenceThreshold ?? 0.72) >= 0.95);
+  const probeRuns = results.filter((r) => (r.r0GateThreshold ?? 0.85) >= 0.95);
   if (probeRuns.length > 0) {
     console.log(`\nHigh-threshold probe runs (gate ≥ 0.95): ${probeRuns.length}`);
     printAggregate(aggregate('  probe subset', probeRuns));

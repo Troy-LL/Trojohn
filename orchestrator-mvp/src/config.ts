@@ -6,12 +6,15 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(projectRoot, '.env'), override: true });
 
-export type TransportMode = 'inprocess' | 'simulated';
+export type TransportMode = 'inprocess' | 'simulated' | 'webrtc';
 export type SimilarityMode = 'embeddings' | 'tfidf';
+export type ScratchpadMode = 'parallel' | 'off';
 
 export interface AppConfig {
   apiKey: string;
   confidenceThreshold: number;
+  /** R0 judge early-exit bar when DELIBERATION_ROUNDS > 0 (separate from merge tolerance). */
+  r0GateThreshold: number;
   defaultTimeoutMs: number;
   roundTimeoutMs: number;
   deliberationRounds: number;
@@ -37,6 +40,10 @@ export interface AppConfig {
   demoEdgeModels: boolean;
   /** Pre-answer critical question round when deliberation is enabled. */
   criticalThinking: boolean;
+  /** Parallel scratchpad/claims alongside free-text deliberation. */
+  scratchpadMode: ScratchpadMode;
+  dbPath: string;
+  signalPort: number;
 }
 
 function bool(name: string, fallback: boolean): boolean {
@@ -58,13 +65,17 @@ export function loadConfig(): AppConfig {
   }
 
   const transport = (process.env.TRANSPORT ?? 'inprocess') as TransportMode;
-  if (transport !== 'inprocess' && transport !== 'simulated') {
-    throw new Error(`Invalid TRANSPORT="${transport}". Use inprocess or simulated.`);
+  if (transport !== 'inprocess' && transport !== 'simulated' && transport !== 'webrtc') {
+    throw new Error(`Invalid TRANSPORT="${transport}". Use inprocess, simulated, or webrtc.`);
   }
+
+  const scratchpadRaw = (process.env.SCRATCHPAD_MODE ?? 'off').toLowerCase();
+  const scratchpadMode: ScratchpadMode = scratchpadRaw === 'parallel' ? 'parallel' : 'off';
 
   return {
     apiKey,
     confidenceThreshold: num('CONFIDENCE_THRESHOLD', 0.72),
+    r0GateThreshold: num('R0_GATE_THRESHOLD', 0.85),
     defaultTimeoutMs: num('DEFAULT_TIMEOUT_MS', 90_000),
     roundTimeoutMs: num('ROUND_TIMEOUT_MS', 30_000),
     deliberationRounds: num('DELIBERATION_ROUNDS', 0),
@@ -91,5 +102,8 @@ export function loadConfig(): AppConfig {
     logDir: path.join(projectRoot, 'logs'),
     demoEdgeModels: bool('DEMO_EDGE_MODELS', true),
     criticalThinking: bool('CRITICAL_THINKING', true),
+    scratchpadMode,
+    dbPath: process.env.DB_PATH ?? path.join(projectRoot, 'data', 'orchestrator-index.json'),
+    signalPort: num('SIGNAL_PORT', 3001),
   };
 }

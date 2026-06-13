@@ -9,6 +9,7 @@ type WorkerState = {
   text: string;
   status: 'idle' | 'running' | 'done' | 'error';
   round: number;
+  phase?: string;
 };
 
 type RoundSummaryView = {
@@ -16,6 +17,13 @@ type RoundSummaryView = {
   phase: string;
   confidence: number;
   earlyExit?: boolean;
+  judgeConfidence?: number;
+};
+
+type ArtifactView = {
+  acceptedClaims: Array<{ id: string; text: string; status: string; confidence: number }>;
+  disputedClaims: Array<{ id: string; text: string; status: string; confidence: number }>;
+  summary: string;
 };
 
 type FinalResult = {
@@ -24,7 +32,10 @@ type FinalResult = {
   withinTolerance: boolean;
   mergeStrategy: string;
   totalLatencyMs: number;
+  r0Gate?: string;
   rounds?: RoundSummaryView[];
+  artifact?: ArtifactView;
+  judgeVerdict?: { confidence: number; conflicts?: string[] };
 };
 
 type LogLine = {
@@ -38,9 +49,14 @@ type Health = {
   workers: string[];
   maxWorkers: number;
   confidenceThreshold: number;
+  r0GateThreshold?: number;
   deliberationRounds: number;
+  criticalThinking?: boolean;
+  similarityMode?: string;
+  scratchpadMode?: string;
   transport: string;
   demoEdgeModels?: boolean;
+  meshNodes?: number;
   models: Array<{ name: string; model: string }>;
 };
 
@@ -66,6 +82,11 @@ function nowTime(): string {
   return new Date().toLocaleTimeString('en-US', { hour12: false });
 }
 
+function formatRoundBadge(round: number): string {
+  if (round === -1) return 'Q';
+  return `R${round}`;
+}
+
 function PhoneWorker({
   id,
   worker,
@@ -86,8 +107,10 @@ function PhoneWorker({
         <div className="phone-screen">
           <span className="phone-role">{meta.label}</span>
           <span className="phone-model">{shortModel(model)}</span>
-          {(worker?.round ?? 0) >= 0 && worker?.status !== 'idle' && (
-            <span className="phone-round">R{worker?.round ?? 0}</span>
+          {worker && worker.status !== 'idle' && (
+            <span className="phone-round" title={worker.phase ?? undefined}>
+              {formatRoundBadge(worker.round)}
+            </span>
           )}
           {status === 'running' && <span className="phone-pulse">running…</span>}
           {status === 'done' && (
@@ -112,14 +135,22 @@ function App() {
   const [workerCount, setWorkerCount] = useState<number>(3);
   const [maxWorkers, setMaxWorkers] = useState<number>(WORKER_ORDER.length);
   const [threshold, setThreshold] = useState(0.72);
+  const [r0GateThreshold, setR0GateThreshold] = useState(0.85);
   const [modelHints, setModelHints] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
+  const [judgeConfidence, setJudgeConfidence] = useState<number | null>(null);
+  const [r0Gate, setR0Gate] = useState<string | null>(null);
+  const [criticalQuestions, setCriticalQuestions] = useState<string[]>([]);
+  const [artifact, setArtifact] = useState<ArtifactView | null>(null);
   const [final, setFinal] = useState<FinalResult | null>(null);
   const [workers, setWorkers] = useState<Record<string, WorkerState>>({});
   const [roundSummaries, setRoundSummaries] = useState<RoundSummaryView[]>([]);
   const [deliberationRounds, setDeliberationRounds] = useState(0);
+  const [criticalThinking, setCriticalThinking] = useState(false);
   const [transport, setTransport] = useState('inprocess');
+  const [meshNodes, setMeshNodes] = useState(0);
+  const [scratchpadMode, setScratchpadMode] = useState('off');
   const [demoEdgeModels, setDemoEdgeModels] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const logId = useRef(0);
@@ -138,8 +169,12 @@ function App() {
         setMaxWorkers(max);
         setWorkerCount((prev) => Math.min(Math.max(prev, 1), max));
         setThreshold(h.confidenceThreshold);
+        setR0GateThreshold(h.r0GateThreshold ?? 0.85);
         setDeliberationRounds(h.deliberationRounds ?? 0);
+        setCriticalThinking(h.criticalThinking ?? false);
         setTransport(h.transport ?? 'inprocess');
+        setMeshNodes(h.meshNodes ?? 0);
+        setScratchpadMode(h.scratchpadMode ?? 'off');
         setDemoEdgeModels(h.demoEdgeModels ?? false);
         const hints: Record<string, string> = {};
         for (const m of h.models) {
@@ -153,7 +188,12 @@ function App() {
           'info',
         );
         if ((h.deliberationRounds ?? 0) > 0) {
-          appendLog(`CLM deliberation: up to ${h.deliberationRounds} follow-up round(s)`, 'info');
+          appendLog(
+            `CLM deliberation: up to ${h.deliberationRounds} follow-up round(s)${h.criticalThinking ? ' + critical question round' : ''}`,
+            'info',
+          );
+        } else {
+          appendLog('Deliberation OFF (DELIBERATION_ROUNDS=0) — workers run propose once only', 'warn');
         }
       })
       .catch(() => appendLog('Server offline — run npm run server', 'error'));
@@ -186,6 +226,10 @@ function App() {
     setRoundSummaries([]);
     setFinal(null);
     setConfidence(null);
+    setJudgeConfidence(null);
+    setR0Gate(null);
+    setCriticalQuestions([]);
+    setArtifact(null);
     appendLog('Reset — cleared session state', 'info');
   }, [appendLog]);
 
@@ -194,6 +238,10 @@ function App() {
     setRunning(true);
     setFinal(null);
     setConfidence(null);
+    setJudgeConfidence(null);
+    setR0Gate(null);
+    setCriticalQuestions([]);
+    setArtifact(null);
     setWorkers({});
     setRoundSummaries([]);
 
@@ -227,6 +275,7 @@ function App() {
             text: '',
             status: 'running',
             round,
+            phase: p.phase,
           },
         }));
       }
@@ -248,7 +297,7 @@ function App() {
           const text = base.round === round ? base.text + p.chunk : p.chunk;
           return {
             ...prev,
-            [p.workerId]: { ...base, text, status: 'running', round },
+            [p.workerId]: { ...base, text, status: 'running', round, phase: base.phase },
           };
         });
       }
@@ -288,8 +337,10 @@ function App() {
           phase?: string;
           earlyExit?: boolean;
           final?: boolean;
+          criticalQuestions?: string[];
         };
         const round = msg.round ?? 0;
+        if (p.criticalQuestions?.length) setCriticalQuestions(p.criticalQuestions);
         if (!p.final) {
           setRoundSummaries((prev) => {
             const next = prev.filter((r) => r.round !== round);
@@ -325,7 +376,14 @@ function App() {
       }
 
       if (msg.type === 'judge_verdict') {
-        appendLog('Judge verdict received', 'info');
+        const p = msg.payload as { confidence?: number };
+        if (typeof p.confidence === 'number') setJudgeConfidence(p.confidence);
+        appendLog(`Judge verdict received (${Math.round((p.confidence ?? 0) * 100)}%)`, 'info');
+      }
+
+      if (msg.type === 'scratchpad_update') {
+        const p = msg.payload as { artifact?: ArtifactView };
+        if (p.artifact) setArtifact(p.artifact);
       }
 
       if (msg.type === 'final') {
@@ -333,6 +391,9 @@ function App() {
         setFinal(p);
         if (p.rounds?.length) setRoundSummaries(p.rounds);
         setConfidence(p.confidence);
+        if (p.r0Gate) setR0Gate(p.r0Gate);
+        if (p.judgeVerdict?.confidence != null) setJudgeConfidence(p.judgeVerdict.confidence);
+        if (p.artifact) setArtifact(p.artifact);
         const pct = Math.round(p.confidence * 100);
         appendLog(
           p.withinTolerance
@@ -390,10 +451,21 @@ function App() {
           <div className="demo-badges">
             {demoEdgeModels && <span className="demo-badge edge">edge SLM</span>}
             {deliberationRounds > 0 && (
-              <span className="demo-badge rounds">≤{deliberationRounds} rounds</span>
+              <span className="demo-badge rounds">
+                ≤{deliberationRounds} rounds{criticalThinking ? ' + Q' : ''}
+              </span>
+            )}
+            {deliberationRounds === 0 && (
+              <span className="demo-badge single-shot">single-shot</span>
             )}
             {transport === 'simulated' && (
               <span className="demo-badge mesh">simulated mesh</span>
+            )}
+            {transport === 'webrtc' && (
+              <span className="demo-badge mesh">webrtc mesh ({meshNodes} nodes)</span>
+            )}
+            {scratchpadMode === 'parallel' && (
+              <span className="demo-badge scratchpad">scratchpad</span>
             )}
           </div>
         </div>
@@ -447,6 +519,19 @@ function App() {
         </div>
       </section>
 
+      <section className="thresholds-panel">
+        <span className="threshold-chip">Merge tolerance: {Math.round(threshold * 100)}%</span>
+        {deliberationRounds > 0 && (
+          <span className="threshold-chip">R0 gate: {Math.round(r0GateThreshold * 100)}%</span>
+        )}
+        {r0Gate && r0Gate !== 'n/a' && (
+          <span className={`threshold-chip gate-${r0Gate}`}>R0 gate: {r0Gate}</span>
+        )}
+        {judgeConfidence != null && (
+          <span className="threshold-chip">Judge: {Math.round(judgeConfidence * 100)}%</span>
+        )}
+      </section>
+
       <section className="stat-cards">
         <div className="stat-card">
           <span className="stat-label">Active workers</span>
@@ -476,9 +561,45 @@ function App() {
               <div key={r.round} className={`round-chip ${r.earlyExit ? 'early' : ''}`}>
                 <span className="round-chip-label">{r.round === -1 ? 'Q' : `R${r.round}`} · {r.phase}</span>
                 {r.phase !== 'question' && (
-                  <span className="round-chip-conf">{Math.round(r.confidence * 100)}%</span>
+                  <span className="round-chip-conf">vote {Math.round(r.confidence * 100)}%</span>
+                )}
+                {r.judgeConfidence != null && (
+                  <span className="round-chip-judge">judge {Math.round(r.judgeConfidence * 100)}%</span>
                 )}
                 {r.earlyExit && <span className="round-chip-exit">early exit</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {criticalQuestions.length > 0 && (
+        <section className="questions-panel">
+          <h2>Critical questions (Q round)</h2>
+          <ul>
+            {criticalQuestions.map((q) => (
+              <li key={q}>{q}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {artifact && (artifact.acceptedClaims.length > 0 || artifact.disputedClaims.length > 0) && (
+        <section className="scratchpad-panel">
+          <h2>Scratchpad claims</h2>
+          <div className="claims-grid">
+            {artifact.acceptedClaims.map((c) => (
+              <div key={c.id} className={`claim-chip status-${c.status}`}>
+                <span className="claim-id">{c.id}</span>
+                <span className="claim-text">{c.text}</span>
+                <span className="claim-meta">{c.status} · {Math.round(c.confidence * 100)}%</span>
+              </div>
+            ))}
+            {artifact.disputedClaims.map((c) => (
+              <div key={c.id} className="claim-chip status-disputed">
+                <span className="claim-id">{c.id}</span>
+                <span className="claim-text">{c.text}</span>
+                <span className="claim-meta">disputed</span>
               </div>
             ))}
           </div>

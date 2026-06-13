@@ -21,7 +21,11 @@ export type MessageType =
   | 'question'
   | 'proposal'
   | 'critique'
-  | 'revision';
+  | 'revision'
+  | 'claim_op'
+  | 'scratchpad_update'
+  | 'worker_task'
+  | 'worker_result';
 
 export interface Message<T = unknown> {
   type: MessageType;

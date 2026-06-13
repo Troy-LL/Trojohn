@@ -2,7 +2,17 @@ import type { AppConfig } from './config.js';
 import type { WorkerConfig, WorkerRole } from './types.js';
 import { CursorWorker } from './workers/cursorWorker.js';
 import { OllamaWorker } from './workers/ollamaWorker.js';
+import { RemoteWorker } from './workers/remoteWorker.js';
 import type { BaseWorker } from './workers/base.js';
+import type { Transport } from './transport/types.js';
+
+const SCRATCHPAD_INSTRUCTION = `
+
+SCRATCHPAD (parallel mode): After your answer, append a fenced JSON block:
+\`\`\`claims
+{"ops":[{"opId":"unique-id","type":"add","claim":{"id":"c1","text":"atomic claim","confidence":0.8}}]}
+\`\`\`
+Ops: add, support, dispute, revise, withdraw. Reference existing claim ids when supporting/disputing.`;
 
 const NO_TOOLS =
   'Answer directly in plain text. Do not use any tools, do not read or write files, do not run commands, do not browse.';
@@ -58,19 +68,42 @@ export const ALL_WORKER_ROLES: WorkerRole[] = ['factual', 'reasoning', 'advocate
 
 export function buildWorkerConfigs(cfg: AppConfig): WorkerConfig[] {
   const active = new Set(cfg.activeWorkers);
-  return ALL_WORKER_ROLES.filter((role) => active.has(role)).map((role) => ({
+  const scratchSuffix = cfg.scratchpadMode === 'parallel' ? SCRATCHPAD_INSTRUCTION : '';
+  const configs: WorkerConfig[] = ALL_WORKER_ROLES.filter((role) => active.has(role)).map((role) => ({
     id: role,
     role,
     provider: ROLE_TRAITS[role].provider,
     model: cfg.models[role],
-    systemPrompt: ROLE_PROMPTS[role],
+    systemPrompt: ROLE_PROMPTS[role] + scratchSuffix,
     timeoutMs: cfg.defaultTimeoutMs,
     weight: ROLE_TRAITS[role].weight,
     voter: ROLE_TRAITS[role].voter,
   }));
+
+  for (const entry of cfg.activeWorkers) {
+    if (!entry.startsWith('phone:')) continue;
+    const nodeId = entry.slice('phone:'.length);
+    configs.push({
+      id: nodeId,
+      role: 'local',
+      provider: 'ollama',
+      model: cfg.models.local,
+      systemPrompt: ROLE_PROMPTS.local + scratchSuffix,
+      timeoutMs: cfg.defaultTimeoutMs,
+      weight: 0.35,
+      voter: true,
+    });
+  }
+
+  return configs;
 }
 
-export function createWorker(config: WorkerConfig, cfg: AppConfig): BaseWorker {
+export function createWorker(config: WorkerConfig, cfg: AppConfig, transport?: Transport): BaseWorker {
+  const isRemote = cfg.activeWorkers.some((a) => a.startsWith('phone:') && a.slice('phone:'.length) === config.id);
+  if (cfg.transport === 'webrtc' && isRemote) {
+    if (!transport) throw new Error('Remote worker requires mesh transport');
+    return new RemoteWorker(config, transport);
+  }
   if (config.provider === 'ollama') {
     return new OllamaWorker(config, cfg.ollamaUrl);
   }
