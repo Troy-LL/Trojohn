@@ -54,6 +54,47 @@ body {
   color: var(--noir-text);
 }
 
+.app-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.demo-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.demo-badge {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--noir-border);
+}
+
+.demo-badge.edge {
+  color: var(--noir-green);
+  border-color: rgba(61, 154, 106, 0.45);
+  background: rgba(61, 154, 106, 0.1);
+}
+
+.demo-badge.rounds {
+  color: var(--noir-amber);
+  border-color: rgba(201, 162, 39, 0.45);
+  background: rgba(201, 162, 39, 0.1);
+}
+
+.demo-badge.mesh {
+  color: var(--noir-blue);
+  border-color: rgba(107, 140, 174, 0.45);
+  background: rgba(107, 140, 174, 0.12);
+}
+
 .app-header p {
   margin: 0.35rem 0 0;
   color: var(--noir-text-muted);

@@ -100,4 +100,79 @@ describe('merge', () => {
     expect(r.mergeStrategy).toBe('fallback-flagged');
     expect(r.withinTolerance).toBe(false);
   });
+
+  it('post-deliberation uses judge confidence over low TF-IDF', async () => {
+    const r = await merge({
+      ...base,
+      deliberationTrigger: 'judge-gated',
+      r0Gate: 'uncertain',
+      rounds: [
+        { round: 0, phase: 'propose', confidence: 0.28, latencyMs: 100, workerIds: [] },
+        { round: 1, phase: 'critique', confidence: 0.28, latencyMs: 100, workerIds: [] },
+        { round: 2, phase: 'revise', confidence: 0.35, latencyMs: 100, workerIds: [] },
+      ],
+      results: [
+        result('factual', 'Revised factual position on death penalty with wrongful conviction data.'),
+        result('reasoning', 'Revised reasoning on death penalty morality and retribution ethics.'),
+      ],
+      judgeVerdict: {
+        finalAnswer: 'The death penalty is generally not morally justified in practice.',
+        confidence: 0.82,
+        conflicts: [],
+      },
+    });
+    expect(r.mergeStrategy).toBe('llm-judge');
+    expect(r.confidence).toBe(0.82);
+    expect(r.withinTolerance).toBe(true);
+    expect(r.finalOutput).toContain('not morally justified');
+  });
+
+  it('early-exit uses judge over high TF-IDF vote', async () => {
+    const text =
+      'Inflation rises when demand exceeds supply and the money supply grows faster than output.';
+    const r = await merge({
+      ...base,
+      deliberationTrigger: 'judge-gated',
+      r0Gate: 'early-exit',
+      rounds: [
+        {
+          round: 0,
+          phase: 'propose',
+          confidence: 0.9,
+          latencyMs: 100,
+          workerIds: [],
+          earlyExit: true,
+        },
+      ],
+      results: [result('factual', text), result('reasoning', text)],
+      judgeVerdict: {
+        finalAnswer: 'Judge-synthesized inflation summary.',
+        confidence: 0.91,
+        conflicts: [],
+      },
+    });
+    expect(r.mergeStrategy).toBe('llm-judge');
+    expect(r.confidence).toBe(0.91);
+    expect(r.finalOutput).toBe('Judge-synthesized inflation summary.');
+  });
+
+  it('post-deliberation without judge falls back to best reviser', async () => {
+    const r = await merge({
+      ...base,
+      deliberationTrigger: 'judge-gated',
+      r0Gate: 'uncertain',
+      rounds: [
+        { round: 0, phase: 'propose', confidence: 0.26, latencyMs: 100, workerIds: [] },
+        { round: 1, phase: 'critique', confidence: 0.23, latencyMs: 100, workerIds: [] },
+        { round: 2, phase: 'revise', confidence: 0.21, latencyMs: 100, workerIds: [] },
+      ],
+      results: [
+        result('factual', 'Social media ban evidence and correlation studies for teens.'),
+        result('reasoning', 'Social media ban reasoning on harm versus effectiveness.'),
+      ],
+    });
+    expect(r.mergeStrategy).toBe('fallback-flagged');
+    expect(r.withinTolerance).toBe(false);
+    expect(r.confidence).toBe(0.21);
+  });
 });

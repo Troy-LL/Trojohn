@@ -40,6 +40,7 @@ type Health = {
   confidenceThreshold: number;
   deliberationRounds: number;
   transport: string;
+  demoEdgeModels?: boolean;
   models: Array<{ name: string; model: string }>;
 };
 
@@ -118,6 +119,8 @@ function App() {
   const [workers, setWorkers] = useState<Record<string, WorkerState>>({});
   const [roundSummaries, setRoundSummaries] = useState<RoundSummaryView[]>([]);
   const [deliberationRounds, setDeliberationRounds] = useState(0);
+  const [transport, setTransport] = useState('inprocess');
+  const [demoEdgeModels, setDemoEdgeModels] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const logId = useRef(0);
   const consoleRef = useRef<HTMLDivElement>(null);
@@ -136,15 +139,21 @@ function App() {
         setWorkerCount((prev) => Math.min(Math.max(prev, 1), max));
         setThreshold(h.confidenceThreshold);
         setDeliberationRounds(h.deliberationRounds ?? 0);
+        setTransport(h.transport ?? 'inprocess');
+        setDemoEdgeModels(h.demoEdgeModels ?? false);
         const hints: Record<string, string> = {};
         for (const m of h.models) {
           const id = m.name.replace('worker:', '');
           if (WORKER_META[id]) hints[id] = m.model;
         }
         setModelHints(hints);
-        appendLog(`Orchestrator ready — up to ${max} workers (${h.workers.join(', ')})`, 'info');
+        const mode = h.demoEdgeModels ? 'edge SLM display' : 'live model IDs';
+        appendLog(
+          `Orchestrator ready — ${max} workers, transport=${h.transport ?? 'inprocess'}, ${mode}`,
+          'info',
+        );
         if ((h.deliberationRounds ?? 0) > 0) {
-          appendLog(`CLM deliberation: ${h.deliberationRounds} follow-up round(s), transport=${h.transport ?? 'inprocess'}`, 'info');
+          appendLog(`CLM deliberation: up to ${h.deliberationRounds} follow-up round(s)`, 'info');
         }
       })
       .catch(() => appendLog('Server offline — run npm run server', 'error'));
@@ -376,7 +385,18 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Orchestrator MVP</h1>
+        <div className="app-header-row">
+          <h1>Orchestrator MVP</h1>
+          <div className="demo-badges">
+            {demoEdgeModels && <span className="demo-badge edge">edge SLM</span>}
+            {deliberationRounds > 0 && (
+              <span className="demo-badge rounds">≤{deliberationRounds} rounds</span>
+            )}
+            {transport === 'simulated' && (
+              <span className="demo-badge mesh">simulated mesh</span>
+            )}
+          </div>
+        </div>
         <p>Multi-model sandbox mesh — simulated phone nodes</p>
       </header>
 

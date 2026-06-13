@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AppConfig } from './config.js';
 import { maskModelForDemo } from './demoDisplay.js';
-import { checkModelHealth } from './registry.js';
+import { checkModelHealth, modelHealthFromConfig } from './registry.js';
 import { Orchestrator } from './orchestrator.js';
 import type { OrchestratorRequest } from './types.js';
 import type { Message } from './transport/types.js';
@@ -26,7 +26,16 @@ export async function startServer(cfg: AppConfig): Promise<void> {
   app.use(express.json());
 
   const orchestrator = new Orchestrator(cfg);
-  const health = await checkModelHealth(cfg);
+  let health;
+  try {
+    health = await checkModelHealth(cfg);
+  } catch (err) {
+    console.warn(
+      'Model health check failed — starting anyway:',
+      err instanceof Error ? err.message : err,
+    );
+    health = modelHealthFromConfig(cfg);
+  }
   const bad = health.filter((h) => !h.ok);
   if (bad.length) {
     console.warn('Unknown model IDs (calls may fail):', bad.map((b) => `${b.name}=${b.model}`).join(', '));

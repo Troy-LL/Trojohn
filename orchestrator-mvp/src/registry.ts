@@ -99,6 +99,20 @@ export async function checkModelHealth(cfg: AppConfig): Promise<ModelHealth[]> {
     for (const alias of m.aliases ?? []) known.add(alias);
   }
 
+  return modelHealthEntries(cfg, (model, checkCursor) =>
+    checkCursor ? known.has(model) : true,
+  );
+}
+
+/** Health rows from config when Cursor.models.list is unreachable at startup. */
+export function modelHealthFromConfig(cfg: AppConfig): ModelHealth[] {
+  return modelHealthEntries(cfg, () => true);
+}
+
+function modelHealthEntries(
+  cfg: AppConfig,
+  okFor: (model: string, checkCursor: boolean) => boolean,
+): ModelHealth[] {
   const entries: Array<[string, string, boolean]> = [
     ['worker:factual', cfg.models.factual, true],
     ['worker:reasoning', cfg.models.reasoning, true],
@@ -116,6 +130,6 @@ export async function checkModelHealth(cfg: AppConfig): Promise<ModelHealth[]> {
     .map(([name, model, checkCursor]) => ({
       name,
       model,
-      ok: checkCursor ? known.has(model) : true,
+      ok: okFor(model, checkCursor),
     }));
 }

@@ -278,7 +278,11 @@ export class Orchestrator {
           rounds,
           rounds.at(-1)?.round ?? 2,
           'final',
+          // After a full deliberation the verdict is expensive to lose — retry harder than R0.
+          { retries: 2, retryDelayMs: 3000 },
         );
+        // Final judge failed — fall back to R0 synthesis rather than raw worker TF-IDF.
+        if (!judgeVerdict && r0Judge) judgeVerdict = r0Judge;
       }
     } else {
       // Single-shot: R0 only, voter gate decides if judge runs
@@ -318,6 +322,7 @@ export class Orchestrator {
           rounds,
           0,
           'final',
+          { retries: 1, retryDelayMs: 2000 },
         );
       }
     }

@@ -22,6 +22,8 @@ npm run server
 npm run server         # terminal 1
 npm run web:dev        # terminal 2
 
+# Phone-mesh demo preset (.env): DELIBERATION_ROUNDS=2, TRANSPORT=simulated, DEMO_EDGE_MODELS=true
+
 # CLI one-shot
 npm run query -- "What causes inflation?"
 

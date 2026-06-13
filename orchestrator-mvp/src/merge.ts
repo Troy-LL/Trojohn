@@ -80,9 +80,35 @@ function buildResponse(
 export async function merge(input: MergeInput): Promise<OrchestratorResponse> {
   const successful = input.results.filter((r) => r.status === 'success' && r.output.trim());
   const voters = successful.filter((r) => r.voter);
+  const postDeliberation = (input.rounds?.length ?? 0) > 1;
+  const verdict = input.judgeVerdict;
+  const judgeAuthoritative =
+    !!verdict && (postDeliberation || input.r0Gate === 'early-exit');
 
   if (successful.length === 0) {
     throw new Error('All workers failed or timed out');
+  }
+
+  // After R1→R2 or R0 early-exit, the judge synthesis is authoritative — voter
+  // similarity must not override it (lexical TF-IDF ≠ semantic agreement).
+  if (judgeAuthoritative) {
+    const { pairs, method } =
+      voters.length >= 2
+        ? await pairwiseSimilarity(
+            voters.map((r) => ({ id: r.workerId, output: r.output })),
+            input.similarityCfg,
+          )
+        : { pairs: [] as PairSimilarity[], method: input.similarityMode };
+    return buildResponse(
+      input,
+      verdict.finalAnswer,
+      verdict.confidence,
+      'llm-judge',
+      verdict.confidence >= input.confidenceThreshold,
+      pairs,
+      verdict,
+      method,
+    );
   }
 
   if (voters.length === 0) {
@@ -131,7 +157,6 @@ export async function merge(input: MergeInput): Promise<OrchestratorResponse> {
     return buildResponse(input, best.output, average, 'majority-vote', true, pairs, null, method);
   }
 
-  const verdict = input.judgeVerdict;
   if (verdict) {
     return buildResponse(
       input,
@@ -141,6 +166,21 @@ export async function merge(input: MergeInput): Promise<OrchestratorResponse> {
       verdict.confidence >= input.confidenceThreshold,
       pairs,
       verdict,
+      method,
+    );
+  }
+
+  if (postDeliberation) {
+    const best = pickBestByWeight(voters, input.weights);
+    const lastRoundConf = input.rounds?.at(-1)?.confidence ?? average;
+    return buildResponse(
+      input,
+      best.output,
+      lastRoundConf,
+      'fallback-flagged',
+      false,
+      pairs,
+      null,
       method,
     );
   }
