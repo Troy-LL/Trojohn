@@ -42,6 +42,7 @@ ACTIVE_WORKERS=factual,reasoning,local npm run query -- "What causes inflation?"
 npm run eval
 npm run eval -- --live
 npm run eval -- --live --multiround-probe   # force R1→R2 (gate=0.95)
+npm run eval -- --live --multiround-probe --probe-query "your query"  # single probe rerun
 ```
 
 ## Architecture
