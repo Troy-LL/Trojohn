@@ -105,11 +105,34 @@ Three further corrections:
 
 Not an inference business. Three narrow things:
 
-1. **$0 capex, embarrassingly parallel, ≤3B, no latency SLA.** Phones you already own or genuine e-waste, running independent small models with no cross-device traffic. The moment you *buy* the phones this dies.
+1. **A personal offline-inference setup on hardware you already own.** Downgraded from "narrow business" to "hobby" on the final pass: "$0 capex" is only true for the 1–5 devices already in your drawer, and buying the sixth puts you at $120–200/unit under the §1 ceiling. 8GB Android does run 7–8B Q4 — but at ~6 tok/s from the CPU, since measured GPU offload is ~1.0×. iOS contributes nothing.
 2. **The phone as endpoint**, where on-device inference buys latency, privacy, or offline operation no rack provides. Real and valuable, and not a compute-supply business.
-3. **Real-device RL rollouts for mobile GUI agents** — the one demand pool that did not close. Xiaomi trains its mobile GUI agent on real phones rather than simulators, citing sim-to-real gaps; MobileGym ([arXiv 2605.26114](https://arxiv.org/pdf/2605.26114)) measures **+40.7 points** from real-device fine-tuning after sim-trained RL. An RL rollout is *forced* batch-1 — serial interaction with one device's mutable state — so it is the one workload a GPU cannot batch past, and the real device is the requirement rather than a cost saving. **No marketplace exists, every lab runs its own racks, no published price.** A market-creation bet, currently under final adversarial review.
+3. ~~Real-device RL rollouts for mobile GUI agents.~~ **CLOSED — killed by its own primary citation.** See §8.1.
 
-Also worth keeping from the devil's advocate: at $65 a phone is "a waterproofed package containing a camera, IMU, GPS, radios, and a CPU — nothing else sells that BOM at that price." Units in the field, tens not thousands. The underwater marine-monitoring node built from a retired phone is the template.
+### 8.1 Why the GUI-agent RL pool closed
+
+The thesis was: rent real-Android-device-hours to labs training mobile GUI agents. An RL rollout is *forced* batch-1 (serial interaction with one device's mutable state), so it looked like the one workload a GPU cannot batch past, with the real device as a requirement rather than a cost saving.
+
+**The claimed evidence was misread, and the correct reading inverts it.** MobileGym ([arXiv 2605.26114](https://arxiv.org/html/2605.26114v1)) is a *simulator* paper — "A Verifiable and Highly Parallel **Simulation** Platform." All training ran in simulation, on 96 parallel environment instances across 3× RTX Pro 6000. The +40.7 points is what a **sim-only** policy scored when transferred to a real phone, and the paper states the transfer directly: **"This corresponds to 95.1% retained gain."** Real devices buy the last **4.9%**. This document's earlier draft cited a transfer-retention figure as if it were a real-device training gain.
+
+Four independent kills follow:
+
+- **The competitor is a container, not a GPU.** MobileGym runs **256 parallel instances on one server** at <10% CPU, ~100GB RAM, ~400MB per instance, ~3s cold start — explicitly designed to escape both real devices *and* heavyweight emulators. Against 256 handsets at the corrected $120–200 = **$30,700–51,200**, plus 256 teardowns, plus $1,000–1,800/month in ops labor. **~300× cheaper on capex, and free and open-source.** The forced-batch-1 insight was correct and irrelevant: at batch 1 the competitor forks, it does not batch.
+- **GRPO structurally requires forking, which a phone cannot do.** The algorithm in the cited paper needs a *group* of rollouts from the *same* state. A container forks state N ways; a physical phone has one mutable timeline, so you must serially reset and replay with no guarantee of arriving at the same state. That corrupts advantage estimation rather than slowing it. Published pipelines confirm the pattern — 64–256 parallel emulators, 128 containerized AVDs, 512 concurrent instances from 10 servers ([MobileGUI-RL](https://arxiv.org/pdf/2507.05720), [MobileRL](https://arxiv.org/pdf/2509.18119), [Android Coach](https://arxiv.org/pdf/2604.07277)). None runs a phone rack for training. Physical devices survive only as final-stage eval: tens of device-hours per model release.
+- **The sim-to-real gap is accounts, not hardware.** Xiaomi names it: "**account states, permission dialogs, payment authentication, and risk-control mechanisms** continually reshape the state distribution" ([Xiaomi-GUI-0](https://arxiv.org/pdf/2606.31410)). None is a property of an Adreno GPU or an LPDDR5 bus; all four are properties of an aged, trusted, payment-attached account on a clean fingerprint — the identity asset from §5, re-derived. Confirming it from the other side: Redroid's *only* documented deficit versus physical is that "automation on emulators has a 3–5× higher detection rate because anti-cheat systems identify spoofed hardware fingerprints." The sole thing a physical device buys over a container is **evading detection**. That is a fraud feature, and a fleet whose value is tripping anti-fraud systems gets burned by them — the product destroys itself as it is consumed.
+- **The exemplar buyer proves the demand is unaddressable.** Xiaomi can do this because it owns the device, the OS, the apps, and the accounts — handset OEM, HyperOS vendor, Mi Store publisher, Xiaomi Pay operator, and first-party deployer, so "training distribution = deployment distribution" is literally true for it and false for any rental customer. A marketplace owns none of the four. Their scheduler even pulls tasks by "current readiness... avoiding assignments to devices that become ineligible" — an architecture built around constant fleet flake.
+
+And no break-even fleet size exists here either, for the same structural reason as §2: a lab needing ~50 environments buys 50 phones for $7,500 and skips you; a lab needing 512 will not put its training loop's inner sampler behind someone else's Wi-Fi, USB hubs, and SLA, because **the environment sits inside the RL step.** Nobody outsources their sampler.
+
+Liability compounds it: the rollout *is* the ToS violation, thousands of times per day by design; whoever supplies the accounts is either manufacturing bulk accounts (BADBOX 2.0's neighborhood) or handing production credentials to a third-party rooted-device operator that no security review passes. *Meta v. Bright Data* turned on **logged-off** scraping; this requires logged-in, account-stateful, automated interaction — the wrong side of that line, deliberately.
+
+Stripped of the compute framing, what remains is "we will operate your device rack for you": a labor-dominated ops shop with a $4–7/device-month floor, no software moat, ~10–30 possible customers who are mostly vertically integrated OEMs, and BrowserStack-class real-device clouds positioned to win the market from a standing start if it ever forms.
+
+**Cheapest settling test, already run: read MobileGym's sim-to-real section.** Second-cheapest for confirmation by construction: `git clone` MobileGym and boot 96 instances on one machine — an afternoon. If it boots, the market this thesis would have created has already been eliminated by a free repo.
+
+3. **A sealed sensor package**, if someone wants a different company. A phone is one unit containing screen, camera, IMU, GPS, LTE, and a battery-capable chassis — the retired-phone [underwater marine-monitoring node](https://www.tomshardware.com/desktops/servers/researchers-convert-old-phones-into-tiny-data-centers-deploy-one-underwater-for-marine-monitoring) is the template. Weakened by the corrected price: at $120–200 an ESP32-CAM stack ($15–40) or Pi Zero 2 W plus camera (~$40) beats it unless you genuinely need *all* of those parts sealed in one box. Units in the field, tens not thousands, value in sensors and packaging with compute incidental. Shares no thesis, infrastructure, or customer with this repo.
+
+**Nothing here is a compute-supply business.** That is the answer.
 
 ## 9. The decision this research was for
 
@@ -123,4 +146,14 @@ One insight generalizes beyond phones: **Darkbloom's economics are not Mac econo
 
 ## Method note
 
-Findings that survived by being attacked rather than asserted. Retracted during this research: a $15/month prefill figure, a $250/month device anchor, "selling FLOPs loses money" (it nets $2.08), and a 1.5–3B model ceiling (8GB drawer phones run 7–8B). The recurring failure mode was an optimistic ceiling used as a unit price; the recurring fix was a calculator with an adversarial self-check and a devil's advocate that gets the last pass. Council protocol in [`../AGENTS.md`](../AGENTS.md).
+Findings that survived by being attacked rather than asserted. Five retractions during this research:
+
+| Claimed | Actual | The error |
+|---|---|---|
+| Prefill work earns ~$15/mo/phone | $2–7 gross | Burst throughput on a current flagship read as sustained on old silicon |
+| A real device is worth $200–250/mo | ~$10/mo of hardware value | AWS "slots determine concurrency" — a concurrency license read as per-handset rent |
+| Selling FLOPs loses money | Nets $2.08/mo | Overstated; the defensible claim was the weaker one (below the consumer floor) |
+| Phones cap at 1.5–3B models | 7–8B Q4 on 8GB drawer phones | Scrap-lot floor mistaken for the population mode |
+| GUI-agent RL: +40.7pt needs real devices | Real devices buy 4.9% | **Transfer-retention figure read as a real-device training gain** |
+
+Every one is the same failure mode: **an optimistic ceiling used as a unit price.** Four were caught by adversarial review, one by the calculator's own self-check, and the last one by a devil's advocate reading the primary source instead of the summary of it. The fix that worked was structural, not diligence: a calculator that asserts against its own conclusions, and a mandatory final pass over the *synthesized* claim rather than the original one. Council protocol in [`../AGENTS.md`](../AGENTS.md).
