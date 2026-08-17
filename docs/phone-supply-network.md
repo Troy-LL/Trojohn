@@ -1,114 +1,89 @@
 # Phone supply network
 
-Where retired-phone compute is viable, where it isn't, and what to build first.
+**Question:** can someone hand a retired phone to a network, have it serve other people, and earn money?
 
-Question: *can someone hand a retired phone to a network, have it serve other people, and earn money?* Short answer: **yes, but not by selling inference.** Selling tokens from phones loses to a datacenter GPU by ~2 orders of magnitude. Selling *verified real-device presence with on-device judgment* is priced ~2 orders of magnitude higher by an existing market. The whole design follows from that gap.
+**Answer: no — not for cash, not at consumer scale.** Two candidate business models were built and both were killed by measurement, not opinion. This document records what was tested, what killed it, and the one narrow thing left standing, so nobody spends a quarter rediscovering it.
 
-## 1. Selling FLOPs is dead — the arithmetic
+> **Scope.** This verdict covers the **consumer-donation** model: a member of the public installs an app and is paid for their own phone. It does **not** cover the **operator-owned phone farm** — retired handsets bought at scale, rooted, racked, actively cooled, with batteries bypassed, run as infrastructure by the party that owns them. That model removes four of the five kills below (no store distribution, no payout rails or KYC, no adverse selection, no consumer battery liability) and turns the question into a pure hardware-TCO comparison against GPUs. It is analysed separately in [`phone-farm-tco.md`](phone-farm-tco.md) and is **open, not refuted**.
 
-| | Value | Source |
+Reproduce the arithmetic: `npm run economics`.
+
+```
+bulk embeddings (sell FLOPs)        net to owner  $2.08/month
+verified device presence            net to owner  $-0.03/month   (1.4% utilization)
+device presence, RETRACTED pricing  net to owner  $124/month     ← do not cite
+```
+
+Both fail `CONSUMER_FLOOR_USD = 5`. The second *loses money against its own electricity*. The $124 row is preserved only to show what a single missing term was worth.
+
+## 1. Model A — sell inference. Dead: $2.08/month.
+
+An A100 80GB at $1.04/hr sustains 60,000 tok/s → **$0.0097 per 1M tokens** ([GigaGPU](https://gigagpu.com/embedding-cost-at-scale-self-hosted-vs-api/)). One replaces ~300 phones and costs $749/month. Paying 300 owners even $2/month is $600 before verification, payout rails, and orchestration — for worse latency. Self-hosting only beats API above 10–15M embeddings/month, so every addressable buyer is already price-optimizing against $0.0097, not the $0.02 retail figure ([pecollective](https://pecollective.com/tools/text-embedding-models-compared/)).
+
+## 2. Model B — sell verified real-device presence. Dead: −$0.03/month.
+
+The reasoning was: a retired handset is a genuine consumer device on a residential/carrier IP in a real place, and no GPU spend forges that. The reasoning is sound. The pricing was not.
+
+**Two anchor errors, both mine, both the same failure mode — a ceiling read as a unit price:**
+
+| Claimed | Actual | Why it was wrong |
 |---|---|---|
-| A100 80GB PCIe, sustained embedding throughput | **60,000 tok/s** at $1.04/hr → **$0.0097 / 1M tokens** at 50% utilization | [GigaGPU](https://gigagpu.com/embedding-cost-at-scale-self-hosted-vs-api/) |
-| L4, 7B embedding model | ~2,000 tok/s | [Introl](https://introl.com/blog/embedding-infrastructure-scale-vector-generation-production-guide-2025) |
-| Embedding API floor | **$0.02 / 1M** (`text-embedding-3-small`) | [pecollective](https://pecollective.com/tools/text-embedding-models-compared/) |
-| Self-hosting break-even | only above **10–15M embeddings/month** | [GigaGPU](https://gigagpu.com/embedding-cost-at-scale-self-hosted-vs-api/) |
-| Phone prefill, Llama-3.2-3B, mobile GPU | 791 tok/s **burst** vs 12.5 tok/s decode | [ML Drift](https://arxiv.org/pdf/2505.00232) |
-| Phone sustained decode, 1.5B Q4 | 8.8–22.6 tok/s, **−44% within 2 iterations** | [Edge under Sustained Load](https://arxiv.org/html/2603.23640v2) |
-| Phone energy | 0.20–0.21 mWh/token, 8.5–13.8 W, 47.9 °C | [MELTing Point](https://arxiv.org/html/2403.12844v2) |
+| Prefill work earns ~$15/mo/phone | $2–7 gross | Used 791 tok/s **burst** on a current flagship as sustained throughput on old silicon; priced against API retail instead of the GPU the buyer would rent |
+| A real device is worth $200–250/mo | **~$10/mo** of hardware value | AWS states *"slots determine concurrency"* — $250 buys a concurrency license against a shared pool, not a handset. Its own breakeven is 1,470 device-minutes = **24.5 device-hours/month, a 3.4% duty cycle** ([AWS pricing](https://aws.amazon.com/device-farm/pricing/)) |
 
-One A100 at $749/month sustains what **~300 phones** do at a generous 200 tok/s sustained prefill. Pay those 300 owners even $2/month and you are at $600/month in payouts *before* verification redundancy (10–30% of compute burned), payout rails, orchestration, and support — to deliver strictly worse latency and reliability.
+The corrected model needed one term the first draft lacked: **demand ÷ fleet = utilization.** A device-hour price is meaningless if nobody buys the hour. At 30k incumbent devices serving essentially all global demand and a 100k-phone fleet, each phone sells **7.35 of its 540 available device-hours — 1.4% utilization.**
 
-Worse, the addressable buyer is self-selected against you: self-hosting only beats API above 10–15M embeddings/month, so anyone big enough to care is already optimizing, and the price to beat is $0.0097/1M, not the $0.02 retail figure.
+### The five kills, each independently sufficient
 
-Run [`npm run economics`](../orchestrator-mvp/scripts/supply-economics.ts) for the arithmetic. At a generous 200 tok/s sustained, 18 h/day: **$3.77/month gross ceiling, $2.08/month net to the owner** after verification overhead and network take. That is 5× the electricity cost and 60× below the device-presence case in §2 — the phone doesn't lose money, it earns an amount nobody installs an app for.
+1. **The market that already sells device identity pays $1–3/month.** Honeygain pays owners **$0.10–0.20/GB** against Bright Data's **$8.40/GB** retail — supply captures **1.2–2.4%**. Realized: $1–3/month/device; $10–25 only by stacking four networks on one already-burned IP. Seven years, mature demand, real buyers. ([Honeygain](https://www.frugalforless.com/honeygain-review/), [Bright Data](https://dataresearchtools.com/bright-data-pricing-2026/), [1dollaperday](https://1dollaperday.com/blog/honeygain-vs-pawns-vs-earnapp-vs-packetstream))
+2. **Nielsen — which needs demographic representativeness and therefore cannot get supply free — pays $3/device/month.** That is the revealed price of a consented consumer device slot, below our own floor. Comscore's MobileXpression has paid ~$5 per user *ever*. Opensignal sources 100M+ devices across 150+ countries for **free** via app + SDK partnerships, paying the app publisher, not the owner. Ookla was acquired for $1.3B on data collected at zero supply cost. ([Nielsen](https://computermobilepanel.nielsen.com/), [Side Hustle Nation](https://www.sidehustlenation.com/get-paid-for-your-data/))
+3. **Real-device QA is not supply-constrained.** BrowserStack: 30,000+ devices, 21 datacenters, no waitlists, "No Terminal Available" in <0.0x% of cases. Firebase charges $5/device-hour with a free daily tier — prices in a scarce market do not have free tiers. Device hardware is 2–5% of their cost structure; the other 96% is reimaging, reservation scheduling, ADB/XCUITest tunneling, SLAs, SOC2, support. A swarm supplies the 4% and *destroys* the 96%: CI requires factory-clean state between runs, pinned OS builds, and a device that won't be picked up mid-test. **QA teams don't have a device shortage; they have a flake budget, and a consumer fleet is a flake generator.** ([BrowserStack](https://www.browserstack.com/real-device-cloud), [Firebase](https://firebase.google.com/pricing))
+4. **Google Play bans the distribution channel, and it is the same dependency as the trust model.** Play policy permits proxy-to-third-party services *only* where that is the app's primary user-facing purpose — and **Honeygain, which qualified for that safe harbour, is still not on Google Play**, removed under this exact policy. PROXYLIB: 28 apps removed, 17 posing as VPNs. BADBOX 2.0: Google sued 25 entities over a 10M-device proxy botnet in July 2025. The consequence nobody drew: Play Integrity *is* a Play Services API, so you cannot be simultaneously banned from Play and dependent on Google's attestation infrastructure. Attestation and distribution are one dependency, controlled by the party that already ruled against this category. ([Play policy](https://support.google.com/googleplay/android-developer/answer/16559646), [Honeygain](https://support.honeygain.com/hc/en-us/articles/360015490879-Why-is-there-no-Honeygain-application-on-Google-Play-Store), [PROXYLIB](https://www.humansecurity.com/learn/blog/satori-threat-intelligence-alert-proxylib-and-lumiapps-transform-mobile-devices-into-proxy-nodes/), [BADBOX](https://thehackernews.com/2025/07/google-sues-25-chinese-entities-over.html))
+5. **The abuse guardrails delete the revenue.** The only price point above $5/month is a dedicated mobile port ($15–100/mo) — which requires being an arbitrary traffic relay with rotation at scale and no questions asked. Those three properties *are* what residential-proxy buyers pay for. Forbid them (correctly) and you keep the compliance cost, the abuse-monitoring cost, the reputational adjacency, and the store ban, and keep none of the revenue. Meanwhile proxy prices collapsed — residential −75%, mobile −98% (>$25/GB → ~$0.50/GB), 250+ providers, demand +50% YoY *while prices fell*. ([Proxidize Proxy Pricing Index 2026](https://proxidize.com/research/proxy-pricing-index-2026/))
 
-> **Retracted claim.** An earlier round argued prefill-heavy work earns ~$15/month/phone and was "10× better than generation." Wrong twice: it treated a 791 tok/s *burst* figure on a current flagship as sustained throughput on old silicon, and it priced against API retail ($0.02/1M) instead of the marginal cost of the GPU the buyer would otherwise rent ($0.0097/1M). The prefill-vs-decode ratio is real and still shapes workload choice — it just doesn't rescue the economics.
->
-> A second correction, caught by the calculator's own self-check while writing this: the first draft of §1 claimed selling FLOPs "loses money." It doesn't. $2.08/month net is positive. The defensible claim is the weaker and more useful one — it clears electricity by an amount below any consumer motivation bar (`CONSUMER_FLOOR_USD = 5`).
+### Two supporting kills
 
-## 2. What a phone has that a datacenter cannot buy
+- **The on-device model isn't load-bearing.** A 20KB screenshot judged by a frontier cloud VLM costs ~$0.0015 — cheaper than the electricity of running a 3B model to 47.9 °C locally. Best-in-class 2B GUI models reach ~77% ScreenSpot accuracy, and that's *grounding*, not verdict; a QA oracle wrong 1 in 4 times costs more to triage than to omit. And the privacy rationale contradicts the verification design: canaries and k-of-n require shipping the artifact anyway. ([ZonUI-3B](https://arxiv.org/pdf/2506.23491), [ShowUI](https://openaccess.thecvf.com/content/CVPR2025/papers/Lin_ShowUI_One_Vision-Language-Action_Model_for_GUI_Visual_Agent_CVPR_2025_paper.pdf))
+- **Adverse selection ranks by adversariality.** The highest-uptime, most professional, most eager supply cohort *is* the click-farm industry — real rooted devices with valid device IDs, already combining residential proxies with fingerprint spoofing, funded by a $32.6B ad-fraud market. Second-best is yield farmers whose IPs are already flagged by every anti-bot vendor. Genuine donors have dead batteries and churn in weeks. ([HUMAN Security](https://www.humansecurity.com/learn/blog/click-fraud-bots-click-farms/))
 
-The one asymmetry: a retired handset is **a genuine consumer device, on a residential or carrier IP, in a real physical location, with real hardware identity.** No amount of GPU spend forges that.
+## 3. Open questions — now answered
 
-The revealed price of this is not speculative:
-
-| Offer | Price | Source |
+| # | Question | Answer |
 |---|---|---|
-| AWS Device Farm, metered | **$0.17 / device-minute** (≈$10/device-hour) | [AWS](https://aws.amazon.com/device-farm/pricing) |
-| AWS Device Farm, unmetered slot | **$250 / month / device** | [AWS](https://aws.amazon.com/device-farm/faqs/) |
-| AWS private device, dedicated hardware | **$200 / month / device** | [AWS](https://aws.amazon.com/device-farm/faqs/) |
+| Q1 | Lithium safety | **Manageable, not a blocker.** Compute heat is 50–80 °C below the 130–160 °C runaway threshold. Real risk is chronic: float charge + heat on an aged cell (below 80% SoH in ~5 months at 100% SoC/25 °C, ~2 months at 40 °C). **An app cannot enforce a charge cap on stock Android** without OEM support or root — so duty-cycling the workload is the only available control. Gate enrollment on ≥80% SoH, fail closed when no SoH signal exists. No incident data exists for this exact use case; Acurast publishes no battery guidance at 270k phones. |
+| Q2 | Demand | **No segment supports a consumer-payout business at $5/device-month.** See kills 1–3. |
+| Q3 | Sustained throughput on old silicon | **Nobody has measured it.** One datapoint exists: Snapdragon 870, 2–4 tok/s decode, CPU-only, burst. CPU-only is the realistic baseline (Vulkan inconsistent pre-Android 12 on Adreno 640/650/660; NNAPI deprecated). SmolVLM-256M (0.8 GB) and Moondream2 (1.2 GB) fit the 2 GB budget by footprint; expect seconds-to-tens-of-seconds per verdict. |
+| Q4 | Verification overhead | **~10–15% of gross** — commit-then-reveal and reputation are structurally free. But two findings reshape the design: **attestation cannot be the fraud control** (Play Integrity Fix / Tricky Store / Shamiko are free, ~30 min, amortized over device lifetime), and **redundancy-compare is invalid, not merely expensive, for localized ground truth** — honest devices legitimately disagree on personalized/A-B-tested results, so k-of-n would slash honest nodes and reward peer-matching over correctness. **Location provenance only survives via carrier/SIM network-attach + cell-ID cross-check**; GPS and IP are both spoofable for ~$0 by anyone already rooting the device. |
+| Q5 | Payout rails | **Monthly cash at $5–25 is not viable.** Honeygain's own $20 minimum is the precedent; Payoneer takes 31–66% on a $10 payout. Viable shape: $25 accrual threshold, quarterly-or-on-threshold, PayPal Payouts API (~2.5%) US/EU/UK first. 1099-K reverted to $20,000/200 txns, but 1099-NEC's $600 still applies if structured as contractor pay. **DAC7 may apply with no revenue floor** if this counts as a personal service. "Crypto avoids KYC" is false. An emissions-subsidized token is a *worse* regulatory bet than cash (Howey/MiCA). |
 
-The same handset is worth **$2–7/month as a compute node and $200–250/month as an addressable real device.** Capturing even 5–10% of the latter clears a consumer motivation bar that no FLOP-selling model reaches.
+Liability, added by the council: the operator instructs stranger-owned devices to interact with third parties. *Meta v. Bright Data* was won on **logged-off** scraping — a logged-in real consumer device sits on the wrong side of that exact distinction. Under GDPR the operator is controller, owes Art. 28 processor terms to every phone and Art. 32 guarantees on rooted hardware, and is unfundable at $2/device-month.
 
-This also explains the pattern in the precedent graveyard: residential-bandwidth sharing is a real business while consumer compute mostly isn't. The value was never the silicon.
+## 4. What survives
 
-## 3. The design that follows
+> **A consented, disclosed, non-cash measurement panel selling *aggregate* network/carrier/localization measurements, where the incentive is app utility rather than a payout.**
 
-**Sell device-grounded tasks; use the local model to make each device useful rather than merely a network exit.**
+It survives by giving up the premise. No cash removes yield-farm adverse selection and the entire payout apparatus (Q5 evaporates). Measuring *the network* rather than interacting with third-party services removes the ToS/CFAA/GDPR-controller exposure and the proxy-policy trigger. Aggregate-only removes the per-device utilization requirement, so an idle fleet is fine — which is the term that killed Model B. And connectivity measurement is the one workload where a datacenter genuinely cannot substitute and no incumbent holds 30,000 spare units.
 
-An on-device SLM upgrades a node from "dumb proxy" to "agent that observes and returns a small structured verdict." That matters for three reasons: raw data never leaves the device, egress stays tiny (a JSON verdict, not a page dump), and the buyer gets a judgment rather than bytes to post-process.
+**What it concedes: the owner earns $0.** That is not the question this document was asked. Recorded as the honest boundary of what the evidence supports.
 
-Candidate workloads, ranked by defensibility rather than throughput:
+*Uncited and worth checking before anyone gets excited:* this shape may already be fully occupied by Ookla/Opensignal-class panels bundled into utility apps. The council flagged its own claim here as an unverified hypothesis.
 
-| Workload | Why a datacenter can't do it | Verifiability |
-|---|---|---|
-| Real-device app QA / regression | Needs genuine OS + SoC diversity | High — deterministic pass/fail, replayable |
-| Localized result verification (search, store listings, pricing, availability) | Needs real regional device + IP | Medium — k-of-n agreement across devices in region |
-| Ad / content delivery verification | Needs real device fingerprint | Medium — same |
-| Network + connectivity measurement | Needs real carrier attachment | High — cross-checkable against known probes |
-| Accessibility / rendering audits on real screens | Needs real device | High — deterministic |
-| On-device personalization / federated updates | Data must not leave | Low — inherently unverifiable, needs different trust model |
-| Bulk embeddings, classification, ASR, OCR | **Nothing.** Datacenter wins on cost | High, but economically pointless |
+## 5. If you want to keep going anyway
 
-Last row stays in the table deliberately: it's the obvious idea, it's cheap to verify, and it loses. Don't build it.
+Ordered by cost. The first three are library research and close this week.
 
-## 4. Trust: attestation works on exactly the target cohort
-
-Good news for the retired-phone premise: **hardware-backed key attestation is mandatory on every device that launched with Android 8.0 or later** (`ro.product.first_api_level` > 25) — which is the cohort being recruited. Devices that merely *upgraded* to 8.0 from earlier do not have it. See [Android key attestation](https://developer.android.com/google/play/integrity/overview) and the [GrapheneOS attestation compatibility guide](https://grapheneos.org/articles/attestation-compatibility-guide).
-
-Two caveats that must be designed around, not assumed away:
-- Some low-quality devices shipped **broken** hardware attestation while Play Integrity still wrongly reports them CTS-certified. Attestation alone is not sufficient; pair it with behavioral checks.
-- Attestation proves *the app is genuine on genuine hardware*. It does **not** prove the computation was performed honestly. That needs redundancy, canaries, or staking on top.
-
-Layered trust model, cheapest first:
-1. Hardware key attestation at enrollment — establishes device class and identity.
-2. Known-answer canary tasks seeded into the queue — catches lazy cheating at ~1–3% overhead.
-3. k-of-n redundancy on a sampled fraction of jobs — catches collusion-free wrong answers.
-4. Reputation with stake/slashing for high-value jobs only — the expensive tier, applied selectively.
-
-## 5. Guardrails — the failure mode that makes this harmful
-
-A network of consented residential devices executing remote instructions is, structurally, one design decision away from a residential proxy botnet. That adjacency is the single largest reputational and legal risk, and the honest version must be built against it from the start:
-
-- **Explicit, revocable consent** with plain-language disclosure of what runs and when. No bundling the agent into an unrelated app's SDK.
-- **Allowlisted job types only.** The node executes named task classes; it does not forward arbitrary traffic and is never a general-purpose proxy exit.
-- **No third-party traffic relay.** Ever. This is the line that separates the product from the abuse case.
-- **Owner-visible activity log** and a one-tap stop.
-- Buyer-side KYC for any workload touching third-party services, and rate limits that make scraping-at-scale unattractive.
-
-## 6. Open questions — need a council round, not an assertion
-
-These were assigned to a council that was cut short. They are unresolved and load-bearing; do not treat the design above as settled until they are answered.
-
-| # | Question | Why it blocks |
-|---|---|---|
-| Q1 | **Lithium safety.** Old cells under sustained 45–50 °C and permanent charging: swelling, thermal runaway, fire. Is there any safe configuration? Charge-limiting to 60–80%? External power with cell removed? | Potentially disqualifying for a consumer product. Liability sits with whoever shipped the app. |
-| Q2 | **Demand.** Who actually buys device-grounded verification, at what price, and would they switch from AWS Device Farm / BrowserStack to a swarm of consumer handsets? Darkbloom proves supply is trivial and demand is the wall. | If no buyer, nothing else matters. |
-| Q3 | **Sustained throughput on old silicon** (Snapdragon 855/865/888, 3–6 GB RAM) for the ranked workloads — measured, not extrapolated from flagship burst figures. | The §1 retraction happened because this was extrapolated once already. |
-| Q4 | **Verification overhead** as a real percentage of revenue, per workload. | Determines whether margins exist at all. |
-| Q5 | **Payout rails** for $5–25/month across many countries: processing minimums, KYC/AML, tax reporting (1099/DAC7), remittance cost. | Micropayouts can cost more than the work is worth. |
-
-## 7. Build first
-
-In order. Each step is falsifiable and the early ones cost nothing.
-
-1. **Answer Q2 before writing a node.** One buyer, one workload, one quoted price. Darkbloom's public leaderboard — calculator promising $280–600/month against a top earner of ~$6 over 30 days — is what happens when supply is built before demand.
-2. **Run [`scripts/supply-economics.ts`](../orchestrator-mvp/scripts/supply-economics.ts)** with real quotes from step 1. It computes the phone-vs-GPU break-even so the argument in §1 is auditable rather than asserted, and it will tell you immediately if a proposed workload is in the dead zone.
-3. **Measure one real phone** (Q3). Android + Termux + llama.cpp, no app build needed: sustained prefill/decode tok/s over 30+ minutes, thermal state, energy. Kill criterion decided in advance: if sustained throughput is under ~25% of the burst figure, every revenue estimate downstream must be rebuilt.
-4. **Only then** build a node: enrollment with key attestation, one allowlisted task class, canary verification, owner-visible log and stop button.
+1. **F1 — read the AWS pricing page and ask sales:** "does one slot mean one reserved physical device?" Predicted FALSE at 95%; the page already says slots are concurrency.
+2. **F3 — trial BrowserStack/Sauce/LambdaTest, measure device-acquisition wait at peak.** Predicted FALSE at 90%; their FAQ pre-concedes <0.0x% unavailability.
+3. **F4 — pre-launch Play policy inquiry.** Predicted FALSE at 85%. **Do this before measuring any phone.** A passing thermal measurement on a product that cannot be distributed is an expensive way to feel productive.
+4. **The three-email supply-price test** — don't ask buyers for quotes, ask incumbents what they *pay for supply*: Opensignal's SDK-partner program, Comscore panel ops, one mobile-proxy supply team. One question: *"what do you pay per consented device per month, and what's your minimum panel size?"* Free, days, returns the clearing price of this exact asset.
+5. Only if 1–4 return numbers above $5/device-month: measure one phone (Q3 protocol), then build a node.
 
 ## What transfers from this repo
 
-Survives: the `Transport` publish/subscribe seam and `Message` envelope, `BaseWorker`'s no-shared-state contract, `RemoteWorker` task/result correlation, and the attestation registry in [`src/registry/`](../orchestrator-mvp/src/registry/) (commitment hashes and audit scores are the right primitive).
+Survives: the `Transport` publish/subscribe seam and `Message` envelope, `BaseWorker`'s no-shared-state contract, `RemoteWorker`'s task/result correlation, and `computeCommitment()` in [`src/registry/attestation.ts`](../orchestrator-mvp/src/registry/attestation.ts) — already a commit-then-reveal primitive, with `penalizeWorker()` as the reputation layer.
 
-Does not survive for this product: synchronous phase barriers, deliberation rounds, the LLM judge, and the similarity merge. A supply network is an async job queue with verification, not a barriered deliberation bus.
+Must be replaced for any job-queue product: `RemoteWorker.call()` is a synchronous one-promise-per-task barrier that cannot fan out canaries or redundant copies; the deliberation vocabulary in `MessageType` (`question`/`proposal`/`critique`/`revision`) is dead weight; and [`sessionIndex.ts`](../orchestrator-mvp/src/store/sessionIndex.ts)'s whole-file JSON rewrite fails at per-task volume.
+
+## Method note
+
+Three claims in this document's own history were retracted after measurement: the $15/month prefill figure, the $250/month device anchor, and "selling FLOPs loses money" (it nets $2.08 — the defensible claim was the weaker one). Two were caught by `scripts/supply-economics.ts`'s self-check, one by a council devil's advocate. The pattern in all three was the same: an optimistic ceiling used as a unit price. Keep the calculator adversarial and keep the retractions visible.

@@ -31,10 +31,26 @@ export interface MarketProfile {
   verificationOverhead: number;
   /** Network's cut of gross. 0.2 = 20%. */
   takeRate: number;
+  /**
+   * Total units the whole market will buy from this network per month, and the
+   * fleet those units are spread across. Utilization = demand / fleet, capped by
+   * what one device can physically produce.
+   *
+   * This is the term whose absence made the first draft wrong: a device-hour
+   * price is meaningless if nobody buys that hour. Omit both to assume a device
+   * sells everything it can make (the old, over-optimistic behaviour).
+   */
+  marketDemandUnitsPerMonth?: number;
+  fleetSize?: number;
 }
 
 export interface Verdict {
+  /** What one device could produce if everything it made was bought. */
+  capacityPerMonth: number;
+  /** What it actually sells, after demand is spread across the fleet. */
   unitsPerMonth: number;
+  /** unitsPerMonth / capacityPerMonth. 1 = saturated, 0.01 = mostly idle. */
+  utilization: number;
   /** Ceiling: selling every unit at exactly the buyer's alternative cost. */
   grossCeilingUsd: number;
   electricityUsd: number;
@@ -47,7 +63,14 @@ export interface Verdict {
 const HOURS_PER_MONTH = 30;
 
 export function evaluate(node: NodeProfile, market: MarketProfile): Verdict {
-  const unitsPerMonth = node.unitsPerHour * node.hoursPerDay * HOURS_PER_MONTH;
+  const capacityPerMonth = node.unitsPerHour * node.hoursPerDay * HOURS_PER_MONTH;
+
+  // Demand-limited, not capacity-limited. A phone only earns for units actually sold.
+  const demandShare =
+    market.marketDemandUnitsPerMonth !== undefined && market.fleetSize
+      ? market.marketDemandUnitsPerMonth / market.fleetSize
+      : Infinity;
+  const unitsPerMonth = Math.min(capacityPerMonth, demandShare);
 
   // Revenue ceiling. Charging above buyerAltUsdPerUnit wins no business, so this
   // is generous by construction: real pricing must undercut it.
@@ -61,7 +84,9 @@ export function evaluate(node: NodeProfile, market: MarketProfile): Verdict {
   const netToOwnerUsd = afterTake - electricityUsd;
 
   return {
+    capacityPerMonth,
     unitsPerMonth,
+    utilization: capacityPerMonth > 0 ? unitsPerMonth / capacityPerMonth : 0,
     grossCeilingUsd,
     electricityUsd,
     netToOwnerUsd,
@@ -77,7 +102,11 @@ function fmt(n: number): string {
 export function report(label: string, node: NodeProfile, market: MarketProfile): Verdict {
   const v = evaluate(node, market);
   console.log(`\n${label}`);
-  console.log(`  volume            ${fmt(v.unitsPerMonth)} ${market.unit}/month`);
+  console.log(`  capacity          ${fmt(v.capacityPerMonth)} ${market.unit}/month`);
+  console.log(
+    `  actually sold     ${fmt(v.unitsPerMonth)} ${market.unit}/month` +
+      (v.utilization < 1 ? `  (${(v.utilization * 100).toFixed(1)}% utilization)` : ''),
+  );
   console.log(`  gross ceiling     $${fmt(v.grossCeilingUsd)}/month  (at buyer's alternative cost)`);
   console.log(`  electricity       $${fmt(v.electricityUsd)}/month`);
   console.log(`  net to owner      $${fmt(v.netToOwnerUsd)}/month`);
@@ -105,11 +134,39 @@ export const EMBEDDINGS = {
 };
 
 /**
- * Verified real-device presence. One device-hour per hour served.
- * Buyer alternative: AWS Device Farm unmetered slot, $250/month => $0.347/device-hour.
- * Deliberately the conservative anchor; metered is $0.17/device-MINUTE (~$10/hr).
+ * Verified real-device presence, priced honestly.
+ *
+ * The first draft used AWS Device Farm's $250/month unmetered tier as the unit
+ * price. That was wrong: AWS states "slots determine concurrency", so $250 buys
+ * a concurrency license against a shared pool, not a handset. Its own metered
+ * breakeven is 1470 device-minutes = 24.5 device-hours/month, a 3.4% duty cycle.
+ *
+ * Corrected inputs:
+ * - retail managed device-hour: $5 (Firebase Test Lab physical device)
+ * - supply-side capture: ~2%. Measured: Honeygain pays owners $0.10-0.20/GB
+ *   against Bright Data's $8.40/GB retail = 1.2-2.4%.
+ * - market demand: BrowserStack's ~30k devices serve essentially all global
+ *   real-device demand with idle headroom; at AWS's own 24.5 h/month duty cycle
+ *   that is ~735k device-hours/month for the whole market.
+ * - fleet: 100k recruited phones, i.e. a successful launch.
  */
 export const DEVICE_PRESENCE = {
+  node: { ...RETIRED_PHONE, unitsPerHour: 1 },
+  market: {
+    unit: 'device-hour',
+    buyerAltUsdPerUnit: 5 * 0.02,
+    verificationOverhead: 0.12,
+    takeRate: 0.3,
+    marketDemandUnitsPerMonth: 30_000 * 24.5,
+    fleetSize: 100_000,
+  },
+};
+
+/**
+ * The retracted version, kept only to show what the missing utilization term was
+ * worth. Do not cite this row.
+ */
+export const DEVICE_PRESENCE_NAIVE = {
   node: { ...RETIRED_PHONE, unitsPerHour: 1 },
   market: {
     unit: 'device-hour',
@@ -133,22 +190,29 @@ export const CONSUMER_FLOOR_USD = 5;
 export function demo(): void {
   const emb = evaluate(EMBEDDINGS.node, EMBEDDINGS.market);
   const dev = evaluate(DEVICE_PRESENCE.node, DEVICE_PRESENCE.market);
+  const naive = evaluate(DEVICE_PRESENCE_NAIVE.node, DEVICE_PRESENCE_NAIVE.market);
 
+  // Both candidate businesses fail the consumer floor. That is the finding.
   const embBelowFloor = emb.netToOwnerUsd < CONSUMER_FLOOR_USD;
-  const devAboveFloor = dev.netToOwnerUsd > CONSUMER_FLOOR_USD;
-  const gapIsOrderOfMagnitude = dev.netToOwnerUsd > emb.netToOwnerUsd * 10;
+  const devBelowFloor = dev.netToOwnerUsd < CONSUMER_FLOOR_USD;
+  // Utilization, not price, is what separates the honest model from the retracted one.
+  const utilizationIsTheKill = dev.utilization < 0.05 && naive.netToOwnerUsd > CONSUMER_FLOOR_USD;
 
-  console.assert(embBelowFloor, `embeddings should net under $${CONSUMER_FLOOR_USD}/month`);
-  console.assert(devAboveFloor, `device presence should net over $${CONSUMER_FLOOR_USD}/month`);
-  console.assert(gapIsOrderOfMagnitude, 'device presence should beat embeddings 10x+');
+  console.assert(embBelowFloor, `embeddings net under $${CONSUMER_FLOOR_USD}`);
+  console.assert(devBelowFloor, `device presence also nets under $${CONSUMER_FLOOR_USD}`);
+  console.assert(utilizationIsTheKill, 'demand/fleet utilization is what kills device presence');
 
-  if (!embBelowFloor || !devAboveFloor || !gapIsOrderOfMagnitude) {
+  if (!embBelowFloor || !devBelowFloor || !utilizationIsTheKill) {
     throw new Error('supply-economics self-check failed');
   }
   console.log(
-    `\nself-check passed: embeddings $${emb.netToOwnerUsd.toFixed(2)} (under the ` +
-      `$${CONSUMER_FLOOR_USD} consumer floor), device presence ` +
-      `$${dev.netToOwnerUsd.toFixed(0)} — ${(dev.netToOwnerUsd / emb.netToOwnerUsd).toFixed(0)}x gap`,
+    `\nself-check passed: BOTH models fail the $${CONSUMER_FLOOR_USD} consumer floor.\n` +
+      `  embeddings                 $${emb.netToOwnerUsd.toFixed(2)}/month\n` +
+      `  device presence (honest)   $${dev.netToOwnerUsd.toFixed(2)}/month at ` +
+      `${(dev.utilization * 100).toFixed(1)}% utilization\n` +
+      `  device presence (retracted)$${naive.netToOwnerUsd.toFixed(0)}/month — the ` +
+      `$${(naive.netToOwnerUsd - dev.netToOwnerUsd).toFixed(0)} difference was the missing ` +
+      `utilization term`,
   );
 }
 
@@ -158,6 +222,7 @@ if (isMain) {
   console.log('Revenue ceiling = buyer\'s cheapest credible alternative, not retail API price.');
   report('bulk embeddings (sell FLOPs)', EMBEDDINGS.node, EMBEDDINGS.market);
   report('verified device presence', DEVICE_PRESENCE.node, DEVICE_PRESENCE.market);
+  report('device presence, RETRACTED pricing', DEVICE_PRESENCE_NAIVE.node, DEVICE_PRESENCE_NAIVE.market);
   demo();
   console.log('\nSwap in your own quotes before trusting any of this. See docs/phone-supply-network.md');
 }
