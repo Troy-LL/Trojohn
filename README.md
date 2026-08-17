@@ -29,7 +29,8 @@ Package details, CLI, WebRTC phone agents, and eval: [`orchestrator-mvp/README.m
 - [Architecture](docs/architecture.md) — topology and data flow
 - [Design](docs/design.md) — mesh UI behavior
 - [Eval](docs/eval.md) — gold command and metrics
-- [Phone supply network](docs/phone-supply-network.md) — where retired-phone compute is and isn't viable
+- [Phone supply network](docs/phone-supply-network.md) — consumer-donation model, refuted
+- [Phone farm TCO](docs/phone-farm-tco.md) — operator-owned farm vs GPUs, refuted; what survives
 
 ## Limits
 
