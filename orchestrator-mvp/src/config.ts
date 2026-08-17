@@ -100,7 +100,9 @@ export function loadConfig(): AppConfig {
     },
     sandboxRoot: path.join(projectRoot, 'sandboxes'),
     logDir: path.join(projectRoot, 'logs'),
-    demoEdgeModels: bool('DEMO_EDGE_MODELS', true),
+    // Default off: masking cloud models under on-device names makes any log
+    // produced that way inadmissible as evidence for the edge-mesh thesis.
+    demoEdgeModels: bool('DEMO_EDGE_MODELS', false),
     criticalThinking: bool('CRITICAL_THINKING', true),
     scratchpadMode,
     dbPath: process.env.DB_PATH ?? path.join(projectRoot, 'data', 'orchestrator-index.json'),

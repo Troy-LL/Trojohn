@@ -5,7 +5,7 @@ import type { AppConfig } from './config.js';
 import { maskModelForDemo } from './demoDisplay.js';
 import { checkModelHealth, modelHealthFromConfig } from './registry.js';
 import { Orchestrator } from './orchestrator.js';
-import { initDb, listWorkers } from './store/sqlite.js';
+import { initDb, listWorkers } from './store/sessionIndex.js';
 import { ensureMeshHub, getMeshHub } from './transport/factory.js';
 import type { OrchestratorRequest } from './types.js';
 import type { Message } from './transport/types.js';
@@ -13,7 +13,10 @@ import type { Message } from './transport/types.js';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function maskMessageForDemo(msg: Message): Message {
-  const payload = { ...msg.payload };
+  if (typeof msg.payload !== 'object' || msg.payload === null) {
+    return msg;
+  }
+  const payload: Record<string, unknown> = { ...(msg.payload as Record<string, unknown>) };
   if (msg.type === 'worker_started' && typeof payload.workerId === 'string') {
     payload.model = maskModelForDemo(payload.workerId, String(payload.model ?? ''));
   }

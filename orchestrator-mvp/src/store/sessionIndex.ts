@@ -1,7 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import type { OrchestratorResponse } from '../types.js';
-import type { Claim } from '../scratchpad/types.js';
+
+// Whole-file JSON index, rewritten on every write. Fine for demo-scale session
+// aggregates; it is NOT a database.
+// ponytail: O(n) rewrite per session — move to node:sqlite (stdlib) before any
+// eval that exceeds ~1k sessions.
 
 export interface WorkerRecord {
   nodeId: string;
@@ -75,10 +79,6 @@ export function upsertSessionResult(result: OrchestratorResponse): void {
     similarityScores: result.similarityScores,
   });
   persist();
-}
-
-export function upsertClaims(_sessionId: string, _claims: Claim[]): void {
-  // claims persisted via artifact on session result when present
 }
 
 export function upsertWorker(record: WorkerRecord): void {

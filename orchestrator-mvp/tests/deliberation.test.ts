@@ -4,6 +4,7 @@ import {
   runDeliberation,
   runProposalRound,
   runQuestionRound,
+  type DeliberationHooks,
 } from '../src/deliberation.js';
 import type { AppConfig } from '../src/config.js';
 import { InProcessTransport } from '../src/transport/inprocess.js';
@@ -243,7 +244,9 @@ describe('runQuestionRound', () => {
     ];
     const transport = new InProcessTransport();
     const cfg = testConfig({ deliberationRounds: 2, criticalThinking: true });
-    const hooks = { publish: (msg: { timestamp?: number }) => transport.publish({ ...msg, timestamp: Date.now() }) };
+    const hooks: DeliberationHooks = {
+      publish: (msg) => transport.publish({ ...msg, timestamp: Date.now() }),
+    };
 
     const question = await runQuestionRound(
       workers,

@@ -6,7 +6,7 @@
  */
 import { loadConfig } from '../config.js';
 import { createWorker, buildWorkerConfigs } from '../registry.js';
-import { initDb } from '../store/sqlite.js';
+import { initDb } from '../store/sessionIndex.js';
 import { recordWorkerAttestation } from '../registry/attestation.js';
 import { connectPhoneAgent } from '../transport/webrtc/signaling.js';
 import type { Message } from '../transport/types.js';

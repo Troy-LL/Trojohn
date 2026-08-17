@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initDb, upsertSessionResult, queryAggregates } from '../src/store/sqlite.js';
+import { initDb, upsertSessionResult, queryAggregates } from '../src/store/sessionIndex.js';
 import type { OrchestratorResponse } from '../src/types.js';
 
 function mockResult(overrides: Partial<OrchestratorResponse> = {}): OrchestratorResponse {

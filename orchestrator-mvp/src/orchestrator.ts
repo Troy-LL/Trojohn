@@ -14,7 +14,7 @@ import { selectWorkers } from './router.js';
 import { pairwiseSimilarity } from './similarity.js';
 import { synthesizeArtifact } from './scratchpad/synthesize.js';
 import type { Scratchpad } from './scratchpad/types.js';
-import { upsertSessionResult, initDb } from './store/sqlite.js';
+import { upsertSessionResult, initDb } from './store/sessionIndex.js';
 import { createTransport } from './transport/factory.js';
 import type { Transport } from './transport/types.js';
 import type { Message } from './transport/types.js';

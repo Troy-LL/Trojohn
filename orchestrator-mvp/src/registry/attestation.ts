@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { listWorkers, upsertWorker, type WorkerRecord } from '../store/sqlite.js';
+import { listWorkers, upsertWorker, type WorkerRecord } from '../store/sessionIndex.js';
 
 export function computeCommitment(output: string, nodeId: string, round: number, timestamp: number): string {
   return createHash('sha256').update(`${output}|${nodeId}|${round}|${timestamp}`).digest('hex');

@@ -309,7 +309,7 @@ async function main(): Promise<void> {
   }
 
   if (sqliteMode) {
-    const { initDb, queryAggregates } = await import('../src/store/sqlite.js');
+    const { initDb, queryAggregates } = await import('../src/store/sessionIndex.js');
     const { loadConfig } = await import('../src/config.js');
     initDb(loadConfig().dbPath);
     const agg = queryAggregates();
